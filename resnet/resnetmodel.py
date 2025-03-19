@@ -22,43 +22,61 @@ class ChannelAttention(nn.Module):
 
 
 class ComplexBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, dropout_prob=0.2):
+    def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels,
+        self.expansion = 4
+
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+
+        self.conv2 = nn.Conv2d(
+            out_channels,
             out_channels,
             kernel_size=3,
             stride=stride,
             padding=1,
             bias=False,
         )
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False
-        )
         self.bn2 = nn.BatchNorm2d(out_channels)
-        self.ca = ChannelAttention(out_channels)
-        self.dropout = nn.Dropout2d(p=dropout_prob)
-        self.stochastic_depth = StochasticDepth(p=0.2, mode="batch")
+
+        self.conv3 = nn.Conv2d(
+            out_channels, out_channels * self.expansion, kernel_size=1, bias=False
+        )
+        self.bn3 = nn.BatchNorm2d(out_channels * self.expansion)
 
         self.shortcut = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
+        if stride != 1 or in_channels != out_channels * self.expansion:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(
-                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
+                    in_channels,
+                    out_channels * self.expansion,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
                 ),
-                nn.BatchNorm2d(out_channels),
+                nn.BatchNorm2d(out_channels * self.expansion),
             )
+
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
         identity = self.shortcut(x)
-        out = nn.ReLU()(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out = self.ca(out)
-        out = self.dropout(out)
-        out = self.stochastic_depth(out)
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+
         out += identity
-        return nn.ReLU()(out)
+        out = self.relu(out)
+
+        return out
 
 
 class ResnetClassifier(nn.Module):
@@ -120,5 +138,17 @@ class ResnetClassifier(nn.Module):
         return self.base(x)
 
 
-def ret_resnet(num_classes, pretrained=True):
-    return ResnetClassifier(num_classes, pretrained=pretrained)
+def ret_resnet(num_classes):
+    model = models.resnet50(pretrained=True)
+
+    model.layer2 = nn.Sequential(
+        ComplexBlock(256, 128, stride=2),
+        ComplexBlock(512, 128),
+        ComplexBlock(512, 128),
+        ComplexBlock(512, 128),
+    )
+
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, num_classes)
+
+    return model

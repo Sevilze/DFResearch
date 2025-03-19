@@ -6,7 +6,7 @@ from torchvision import transforms, datasets
 import matplotlib.pyplot as plt
 from resnetmodel import ret_resnet
 
-class AdvancedDataLoader:
+class Dataloader:
     def __init__(self, data_dir, batch_size=64, val_split=0.2):
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -50,7 +50,7 @@ class AdvancedDataLoader:
 class Trainer:
     def __init__(self, data_dir, num_classes, batch_size=64, lr=0.001):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.data_loader = AdvancedDataLoader(data_dir, batch_size)
+        self.data_loader = Dataloader(data_dir, batch_size)
         self.model = ret_resnet(num_classes).to(self.device)
         self._setup_training(lr)
         self.class_names = self.data_loader.class_names
