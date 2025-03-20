@@ -7,7 +7,7 @@ from dataloader import DataLoaderWrapper
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from resnet.resnetmodel import ret_resnet
+from resnet.resnetmodel import ResnetClassifier
 from loaderconf import BATCH_SIZE, VAL_SPLIT
 
 class EnsembleTrainer:
@@ -19,17 +19,29 @@ class EnsembleTrainer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
         
-        self.model = ret_resnet(num_classes=self.num_classes)
+        self.model = ResnetClassifier(
+            num_classes=self.num_classes,
+            pretrained=True,
+            use_complex_blocks=True
+        )        
         self.model.to(self.device)
         
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.AdamW(self.model.parameters(), lr=0.001, weight_decay=1e-4)
         
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, 
+            mode='max',
+            factor=0.1,
+            patience=30,
+        )
+
         self.history = {
             'train_loss': [],
             'train_acc': [],
             'val_loss': [],
-            'val_acc': []
+            'val_acc': [],
+            'lr': []
         }
 
     def train_epoch(self):
@@ -86,9 +98,8 @@ class EnsembleTrainer:
         
         return total_loss / len(self.test_loader), correct / total
 
-    def train(self, epochs=25):
+    def train(self, epochs):
         best_acc = 0
-        
         os.makedirs('models', exist_ok=True)
         
         epoch_pbar = tqdm(range(epochs), desc='Epochs')
@@ -96,16 +107,21 @@ class EnsembleTrainer:
             train_loss, train_acc = self.train_epoch()
             val_loss, val_acc = self.evaluate()
             
+            self.scheduler.step(val_acc)
+            current_lr = self.optimizer.param_groups[0]['lr']
+            
             self.history['train_loss'].append(train_loss)
             self.history['train_acc'].append(train_acc)
             self.history['val_loss'].append(val_loss)
             self.history['val_acc'].append(val_acc)
+            self.history['lr'].append(current_lr)
             
             epoch_pbar.set_postfix({
                 'train_loss': f'{train_loss:.4f}',
                 'train_acc': f'{train_acc:.4f}',
                 'val_loss': f'{val_loss:.4f}',
-                'val_acc': f'{val_acc:.4f}'
+                'val_acc': f'{val_acc:.4f}',
+                'lr': f'{current_lr:.6f}'
             })
             
             if val_acc > best_acc:
@@ -114,6 +130,7 @@ class EnsembleTrainer:
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.scheduler.state_dict(),
                     'best_acc': best_acc,
                 }, 'models/best_model.pth')
             
@@ -122,6 +139,7 @@ class EnsembleTrainer:
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.scheduler.state_dict(),
                     'history': self.history,
                 }, f'models/checkpoint_epoch_{epoch+1}.pth')
 
@@ -157,7 +175,7 @@ def main():
     trainer = EnsembleTrainer(BATCH_SIZE, VAL_SPLIT)
     
     try:
-        trainer.train(epochs=25)
+        trainer.train(epochs=10)
         trainer.plot_training_curves()
         
     except KeyboardInterrupt:

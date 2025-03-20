@@ -80,7 +80,7 @@ class ComplexBlock(nn.Module):
 
 
 class ResnetClassifier(nn.Module):
-    def __init__(self, num_classes, pretrained=True, use_complex_blocks=True):
+    def __init__(self, num_classes, pretrained, use_complex_blocks):
         super().__init__()
         self.base = models.resnet50(
             weights=models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
@@ -106,24 +106,24 @@ class ResnetClassifier(nn.Module):
 
     def _modify_resnet_architecture(self):
         self.base.layer2 = nn.Sequential(
-            ComplexBlock(512, 512, stride=2),
-            ComplexBlock(512, 512),
-            ComplexBlock(512, 512),
-            ComplexBlock(512, 512),
+            ComplexBlock(256, 128, stride=2),
+            ComplexBlock(512, 128),
+            ComplexBlock(512, 128),
+            ComplexBlock(512, 128),
         )
 
         self.base.layer3 = nn.Sequential(
-            ComplexBlock(1024, 1024, stride=2),
-            ComplexBlock(1024, 1024),
-            ComplexBlock(1024, 1024),
-            ComplexBlock(1024, 1024),
-            ComplexBlock(1024, 1024),
+            ComplexBlock(512, 256, stride=2),
+            ComplexBlock(1024, 256),
+            ComplexBlock(1024, 256),
+            ComplexBlock(1024, 256),
+            ComplexBlock(1024, 256),
         )
 
         self.base.layer4 = nn.Sequential(
-            ComplexBlock(2048, 2048, stride=2),
-            ComplexBlock(2048, 2048),
-            ComplexBlock(2048, 2048),
+            ComplexBlock(1024, 512, stride=2),
+            ComplexBlock(2048, 512),
+            ComplexBlock(2048, 512),
         )
 
     def _init_weights(self):
@@ -136,19 +136,3 @@ class ResnetClassifier(nn.Module):
 
     def forward(self, x):
         return self.base(x)
-
-
-def ret_resnet(num_classes):
-    model = models.resnet50(pretrained=True)
-
-    model.layer2 = nn.Sequential(
-        ComplexBlock(256, 128, stride=2),
-        ComplexBlock(512, 128),
-        ComplexBlock(512, 128),
-        ComplexBlock(512, 128),
-    )
-
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, num_classes)
-
-    return model
