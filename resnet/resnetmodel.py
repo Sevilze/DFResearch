@@ -1,6 +1,7 @@
+import torch
 import torch.nn as nn
 import torchvision.models as models
-from torchvision.ops import StochasticDepth
+import dfresearch.loaderconf as config
 
 
 class ChannelAttention(nn.Module):
@@ -80,31 +81,41 @@ class ComplexBlock(nn.Module):
 
 
 class ResnetClassifier(nn.Module):
-    def __init__(self, num_classes, pretrained, use_complex_blocks):
+    def __init__(self, num_classes, pretrained, use_complex_blocks, in_channels=config.INPUT_CHANNELS):
         super().__init__()
         self.base = models.resnet50(
             weights=models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
         )
 
         if use_complex_blocks:
-            self._modify_resnet_architecture()
+            self.modify_resnet_architecture()
 
+        original_conv1 = self.base.conv1
+        self.base.conv1 = nn.Conv2d(
+            in_channels,
+            original_conv1.out_channels,
+            kernel_size=original_conv1.kernel_size,
+            stride=original_conv1.stride,
+            padding=original_conv1.padding,
+            bias=False
+        )
+        
+        with torch.no_grad():
+            self.base.conv1.weight[:, :3] = original_conv1.weight.clone()
+            self.base.conv1.weight[:, 3:] = original_conv1.weight.mean(dim=1, keepdim=True)
+        
         num_ftrs = self.base.fc.in_features
         self.base.fc = nn.Sequential(
             nn.Linear(num_ftrs, 1024),
             nn.BatchNorm1d(1024),
             nn.GELU(),
             nn.Dropout(0.5),
-            nn.Linear(1024, 512),
-            nn.BatchNorm1d(512),
-            nn.GELU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_classes),
+            nn.Linear(1024, num_classes)
         )
 
-        self._init_weights()
+        self.init_weights()
 
-    def _modify_resnet_architecture(self):
+    def modify_resnet_architecture(self):
         self.base.layer2 = nn.Sequential(
             ComplexBlock(256, 128, stride=2),
             ComplexBlock(512, 128),
@@ -126,7 +137,7 @@ class ResnetClassifier(nn.Module):
             ComplexBlock(2048, 512),
         )
 
-    def _init_weights(self):
+    def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
