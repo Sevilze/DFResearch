@@ -159,7 +159,7 @@ class EnsembleTrainer:
 
             if val_acc > best_acc:
                 best_acc = val_acc
-                save_path = f"models/{self.model_name}_best.pth"
+                save_path = f"models/{self.model_name}/{self.model_name}_best.pth"
                 torch.save(
                     {
                         "epoch": epoch,
@@ -173,7 +173,6 @@ class EnsembleTrainer:
                 tqdm.write(f"New best {self.model_name} accuracy: {best_acc:.2%}")
 
     def plot_training_curves(self):
-        os.makedirs("plots", exist_ok=True)
         plt.figure(figsize=(12, 5))
 
         plt.subplot(1, 2, 1)
@@ -191,7 +190,7 @@ class EnsembleTrainer:
         plt.legend()
 
         plt.tight_layout()
-        plt.savefig(f"plots/training_{self.model_name}.png")
+        plt.savefig(f"models/{self.model_name}/training_{self.model_name}.png")
         plt.close()
 
 
@@ -226,7 +225,7 @@ def main():
                 recompute_stats=RECOMPUTE_NORM,
             )
 
-            trainer.train(epochs=15, max_lr=0.01)
+            trainer.train(epochs=25, max_lr=0.01)
             trainer.plot_training_curves()
 
         except Exception as e:

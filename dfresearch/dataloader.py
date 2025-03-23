@@ -25,7 +25,7 @@ class ChannelAugmentation:
         add_fft=True,
         add_lbp=True,
         add_ltp=False,
-        dwt_wavelet="haar",
+        dwt_wavelet="bior2.2",
         hog_orientations=9,
         hog_pixels_per_cell=(8, 8),
         lbp_n_points=8,

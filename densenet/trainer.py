@@ -1,7 +1,7 @@
 import torch
 from dfresearch.basetrainer import BaseTrainer
 
-class ResnetTrainer(BaseTrainer):
+class DensenetTrainer(BaseTrainer):
     def __init__(self, model, train_loader, test_loader, epochs, max_lr):
         super().__init__(model, train_loader, test_loader, epochs, max_lr)
         self.optimizer = torch.optim.AdamW(
