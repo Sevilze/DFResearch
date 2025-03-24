@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
-from setup import get_dataset_path
+from .setup import get_dataset_path
 from scipy.fftpack import dctn
 from skimage.filters import sobel
 from skimage.feature import hog
@@ -11,7 +11,7 @@ from skimage.feature import local_binary_pattern
 from skimage.transform import resize
 import pywt
 from tqdm import tqdm
-from loaderconf import BATCH_SIZE, RECOMPUTE_NORM
+from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
 
 
 class ChannelAugmentation:

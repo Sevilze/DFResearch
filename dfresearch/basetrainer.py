@@ -82,7 +82,7 @@ class BaseTrainer:
             pbar.set_postfix({
                 "loss": f"{total_loss/total:.4f}",
                 "acc": f"{100.*correct/total:.2f}%",
-                "mem": self._get_memory_usage()
+                "mem": self.get_memory_usage()
             })
 
         return total_loss / len(self.test_loader), correct / total
@@ -115,7 +115,7 @@ class BaseTrainer:
             'train_acc': f'{train_acc:.4f}',
             'val_loss': f'{val_loss:.4f}',
             'val_acc': f'{val_acc:.4f}',
-            'mem': self._get_memory_usage()
+            'mem': self.get_memory_usage()
         })
 
     def save_model(self, epoch, best_acc):

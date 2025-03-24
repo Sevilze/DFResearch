@@ -1,8 +1,8 @@
 import argparse
 import torch
 import numpy as np
-from dataloader import DataLoaderWrapper
-from loaderconf import BATCH_SIZE, RECOMPUTE_NORM
+from .dataloader import DataLoaderWrapper
+from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Model Training Framework')
@@ -43,7 +43,8 @@ def main():
         from densenet.trainer import DensenetTrainer
         model = DensenetClassifier(
             num_classes=2,
-            in_channels=data_wrapper.input_channels
+            pretrained=True,
+            in_channels=data_wrapper.input_channels,
         )
         trainer = DensenetTrainer(
             model=model,
@@ -53,7 +54,7 @@ def main():
             max_lr=args.lr
         )
 
-    trainer.train()
+    trainer.train(trainer.epochs)
     trainer.plot_training_curves()
 
 if __name__ == "__main__":

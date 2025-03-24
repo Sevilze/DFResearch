@@ -180,17 +180,17 @@ class DensenetClassifier(nn.Module):
         
         self.channels = {
             'stem': 64,
-            'transition1': 128 + 6 * growth_rate,
-            'transition2': 128 + 6 * growth_rate + 12 * growth_rate,
-            'transition3': 128 + 6 * growth_rate + 12 * growth_rate + 24 * growth_rate,
+            'transition1': growth_rate * 4,
+            'transition2': growth_rate * 8,
+            'transition3': growth_rate * 16,
             'final': 1024
         }
         
         self.spatial_attention = SpatialAttention()
         self.channel_attention_stem = ChannelAttention(self.channels['stem'])
-        self.channel_attention_t1 = ChannelAttention(self.channels['transition1'] // 2)
-        self.channel_attention_t2 = ChannelAttention(self.channels['transition2'] // 2)
-        self.channel_attention_t3 = ChannelAttention(self.channels['transition3'] // 2)
+        self.channel_attention_t1 = ChannelAttention(self.channels['transition1'])
+        self.channel_attention_t2 = ChannelAttention(self.channels['transition2'])
+        self.channel_attention_t3 = ChannelAttention(self.channels['transition3'])
         self.channel_attention_final = ChannelAttention(self.channels['final'])
         
         self.noise_module = NoiseAnalysis(self.channels['stem'])

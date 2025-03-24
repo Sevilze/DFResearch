@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torch import nn, optim
 from tqdm import tqdm
-from dataloader import DataLoaderWrapper
+from .dataloader import DataLoaderWrapper
 import sys
 import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from resnet.resnetmodel import ResnetClassifier
-from loaderconf import BATCH_SIZE, RECOMPUTE_NORM
+from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
 
 
 class EnsembleTrainer:
