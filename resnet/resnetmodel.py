@@ -105,9 +105,10 @@ class FrequencyAnalysis(nn.Module):
         fft = torch.fft.rfft2(x)
         fft_real = torch.view_as_real(fft)
         fft_real = fft_real.permute(0, 1, 4, 2, 3).reshape(b, c * 2, h, w // 2 + 1)
-        fft_info = torch.nn.functional.interpolate(fft_real, size=(h, w), mode="bilinear", align_corners=False)
+        fft_info = torch.nn.functional.interpolate(
+            fft_real, size=(h, w), mode="bilinear", align_corners=False
+        )
         return self.conv_after_fft(fft_info)
-
 
 
 class NoiseAnalysis(nn.Module):
@@ -148,15 +149,34 @@ class SpatialAttention(nn.Module):
 class CrossResolution(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        self.down = nn.AvgPool2d(2)
-        self.up = nn.Upsample(scale_factor=2, mode="bilinear")
-        self.fusion = nn.Conv2d(channels * 2, channels, kernel_size=1)
+
+        self.down2x = nn.AvgPool2d(2)
+        self.down4x = nn.AvgPool2d(4)
+        self.up2x = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.up4x = nn.Upsample(scale_factor=4, mode="bilinear", align_corners=False)
+
+        self.scale_processor = nn.Sequential(
+            nn.Conv2d(channels * 3, channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=1),
+            nn.Sigmoid(),
+        )
 
     def forward(self, x):
-        downsampled = self.down(x)
-        upsampled = self.up(downsampled)
-        diff = x - upsampled
-        return self.fusion(torch.cat([x, diff], dim=1))
+        down2x = self.down2x(x)
+        down4x = self.down4x(x)
+
+        up_from_2x = self.up2x(down2x)
+        up_from_4x = self.up4x(down4x)
+
+        diff2x = x - up_from_2x
+        diff4x = x - up_from_4x
+
+        combined = torch.cat([x, diff2x, diff4x], dim=1)
+        attention = self.scale_processor(combined)
+
+        return x * attention
 
 
 class ResnetClassifier(nn.Module):
@@ -165,7 +185,6 @@ class ResnetClassifier(nn.Module):
         self.base = models.resnet50(
             weights=models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
         )
-        # self.frequency_module = FrequencyAnalysis(64)
         self.spatial_attention = SpatialAttention()
         self.noise_module = NoiseAnalysis(64)
         self.ela_module = ELA(64)
@@ -241,17 +260,13 @@ class ResnetClassifier(nn.Module):
         x = self.base.conv1(x)
         x = self.base.bn1(x)
         x = self.base.relu(x)
-        
-        # freq_features = self.frequency_module(x)
-        # x = x + freq_features
+
         x = self.channel_attention1(x)
         x = self.spatial_attention(x)
-        # x = self.noise_module(x)
-        # x = self.ela_module(x)
         x = self.cross_res_module(x)
-        
+
         x = self.base.maxpool(x)
-        
+
         x = self.base.layer1(x)
         x = self.channel_attention2(x)
 
@@ -263,9 +278,9 @@ class ResnetClassifier(nn.Module):
 
         x = self.base.layer4(x)
         x = self.channel_attention5(x)
-        
+
         x = self.base.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.base.fc(x)
-        
+
         return x

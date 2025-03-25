@@ -5,17 +5,27 @@ class ResnetTrainer(BaseTrainer):
     def __init__(self, model, train_loader, test_loader, epochs, max_lr):
         super().__init__(model, train_loader, test_loader, epochs, max_lr)
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), 
-            lr=0.001, 
-            weight_decay=2e-4
+            self.model.parameters(),
+            lr=0.001,
+            weight_decay=1e-4,
+            betas=(0.9, 0.999),
+            eps=1e-8,
         )
-        self.scaler = torch.amp.grad_scaler.GradScaler(self.device)
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
             self.optimizer,
             max_lr=max_lr,
             steps_per_epoch=len(self.train_loader),
             epochs=epochs,
-            anneal_strategy='cos'
+            anneal_strategy="cos",
+            pct_start=0.3,
+            div_factor=10,
+            final_div_factor=1e4,
+        )
+        self.scaler = torch.amp.grad_scaler.GradScaler(
+            init_scale=2.**16,
+            growth_factor=2.0,
+            backoff_factor=0.5,
+            growth_interval=2000
         )
 
     def train_epoch(self):

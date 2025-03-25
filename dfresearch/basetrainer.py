@@ -1,8 +1,10 @@
 import os
+import shutil
 import torch
 import matplotlib.pyplot as plt
 from torch import nn
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 class BaseTrainer:
     def __init__(self, model, train_loader, test_loader, epochs, max_lr):
@@ -12,20 +14,33 @@ class BaseTrainer:
         self.epochs = epochs
         self.max_lr = max_lr
         self.model_name = model.__class__.__name__
-        
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)
-        
+
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = None
         self.scheduler = None
         self.scaler = None
-        
+
         self.history = {
-            "train_loss": [], "train_acc": [],
-            "val_loss": [], "val_acc": [],
-            "lr": []
+            "train_loss": [],
+            "train_acc": [],
+            "val_loss": [],
+            "val_acc": [],
+            "lr": [],
         }
+
+        self.model_dir = os.path.join("models", self.model_name)
+        os.makedirs(self.model_dir, exist_ok=True)
+        self.runs_dir = os.path.join(self.model_dir, "runs")
+        if os.path.exists(self.runs_dir):
+            shutil.rmtree(self.runs_dir)
+        os.makedirs(self.runs_dir, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=self.runs_dir)
+        self.best_model_dir = os.path.join(self.model_dir, "best_model")
+        os.makedirs(self.best_model_dir, exist_ok=True)
+        self.best_eval_file = os.path.join(self.best_model_dir, "best_eval.txt")
 
     def get_memory_usage(self):
         if torch.cuda.is_available():
@@ -60,10 +75,6 @@ class BaseTrainer:
         correct += predicted.eq(labels).sum().item()
         return total_loss, correct, total
 
-    def get_save_path(self):
-        os.makedirs(f"models/{self.model_name}", exist_ok=True)
-        return f"models/{self.model_name}/{self.model_name}_best.pth"
-
     def evaluate(self):
         self.model.eval()
         total_loss = 0
@@ -73,79 +84,135 @@ class BaseTrainer:
         pbar = self.init_tqdm(self.test_loader, "Evaluating")
         for inputs, labels in pbar:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
-            
+
             loss, outputs = self.common_eval_step(inputs, labels)
             total_loss, correct, total = self.update_metrics(
                 loss, outputs, labels, total_loss, correct, total
             )
-            
-            pbar.set_postfix({
-                "loss": f"{total_loss/total:.4f}",
-                "acc": f"{100.*correct/total:.2f}%",
-                "mem": self.get_memory_usage()
-            })
+
+            pbar.set_postfix(
+                {
+                    "loss": f"{total_loss / total:.4f}",
+                    "acc": f"{100.0 * correct / total:.2f}%",
+                    "mem": self.get_memory_usage(),
+                }
+            )
 
         return total_loss / len(self.test_loader), correct / total
 
     def train(self, epochs):
-        best_acc = 0
+        best_acc = self.read_best_eval()
 
-        epoch_pbar = tqdm(range(epochs), desc=f'Training {self.model_name}')
+        epoch_pbar = tqdm(range(epochs), desc=f"Training {self.model_name}")
         for epoch in epoch_pbar:
             train_loss, train_acc = self.train_epoch()
             val_loss, val_acc = self.evaluate()
 
             self.update_history(train_loss, train_acc, val_loss, val_acc)
-            self.update_progress_bar(epoch_pbar, train_loss, train_acc, val_loss, val_acc)
+            self.update_progress_bar(
+                epoch_pbar, train_loss, train_acc, val_loss, val_acc
+            )
+            self.log_to_tensorboard(epoch, train_loss, train_acc, val_loss, val_acc)
+            self.plot_training_curves(epoch)
 
             if val_acc > best_acc:
                 best_acc = val_acc
+                self.write_best_eval(best_acc)
                 self.save_model(epoch, best_acc)
+                self.copy_tfoutput_to_best()
 
     def update_history(self, train_loss, train_acc, val_loss, val_acc):
         self.history["train_loss"].append(train_loss)
         self.history["train_acc"].append(train_acc)
         self.history["val_loss"].append(val_loss)
         self.history["val_acc"].append(val_acc)
-        self.history["lr"].append(self.optimizer.param_groups[0]['lr'])
+        self.history["lr"].append(self.optimizer.param_groups[0]["lr"])
 
     def update_progress_bar(self, pbar, train_loss, train_acc, val_loss, val_acc):
-        pbar.set_postfix({
-            'train_loss': f'{train_loss:.4f}',
-            'train_acc': f'{train_acc:.4f}',
-            'val_loss': f'{val_loss:.4f}',
-            'val_acc': f'{val_acc:.4f}',
-            'mem': self.get_memory_usage()
-        })
+        pbar.set_postfix(
+            {
+                "train_loss": f"{train_loss:.4f}",
+                "train_acc": f"{train_acc:.4f}",
+                "val_loss": f"{val_loss:.4f}",
+                "val_acc": f"{val_acc:.4f}",
+                "mem": self.get_memory_usage(),
+            }
+        )
+
+    def log_to_tensorboard(self, epoch, train_loss, train_acc, val_loss, val_acc):
+        self.writer.add_scalar("Loss/Train", train_loss, epoch)
+        self.writer.add_scalar("Loss/Validation", val_loss, epoch)
+        self.writer.add_scalar("Accuracy/Train", train_acc, epoch)
+        self.writer.add_scalar("Accuracy/Validation", val_acc, epoch)
+        self.writer.add_scalar(
+            "LearningRate", self.optimizer.param_groups[0]["lr"], epoch
+        )
+        self.writer.flush()
 
     def save_model(self, epoch, best_acc):
-        save_path = self.get_save_path()
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'best_acc': best_acc,
-        }, save_path)
-        tqdm.write(f"New best {self.model_name} accuracy: {best_acc:.2%}")
+        save_path = os.path.join(self.best_model_dir, f"{self.model_name}_best.pth")
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": self.scheduler.state_dict(),
+                "best_acc": best_acc,
+            },
+            save_path,
+        )
+        tqdm.write(
+            f"New best {self.model_name} accuracy: {best_acc:.2%} (saved to {save_path})"
+        )
 
-    def plot_training_curves(self):
+    def read_best_eval(self):
+        if os.path.exists(self.best_eval_file):
+            try:
+                with open(self.best_eval_file, "r") as f:
+                    best_acc = float(f.read().strip())
+                    return best_acc
+            except Exception:
+                return 0
+        return 0
+
+    def write_best_eval(self, best_acc):
+        with open(self.best_eval_file, "w") as f:
+            f.write(f"{best_acc}")
+
+    def copy_tfoutput_to_best(self):
+        for file in os.listdir(self.runs_dir):
+            if file.startswith("events.out.tfevents"):
+                src = os.path.join(self.runs_dir, file)
+                dst = os.path.join(self.best_model_dir, "tfoutput_" + file)
+                shutil.copy(src, dst)
+                tqdm.write(f"Copied TensorBoard event file to {dst}")
+                break
+
+    def plot_training_curves(self, epoch):
         plt.figure(figsize=(12, 5))
-        
         plt.subplot(1, 2, 1)
-        plt.plot(self.history['train_loss'], label='Train Loss')
-        plt.plot(self.history['val_loss'], label='Val Loss')
-        plt.title(f'{self.model_name} Loss')
-        plt.xlabel('Epoch')
+        plt.plot(self.history["train_loss"], label="Train Loss")
+        plt.plot(self.history["val_loss"], label="Val Loss")
+        plt.title(f"{self.model_name} Loss")
+        plt.xlabel("Epoch")
         plt.legend()
-        
+
         plt.subplot(1, 2, 2)
-        plt.plot(self.history['train_acc'], label='Train Accuracy')
-        plt.plot(self.history['val_acc'], label='Val Accuracy')
-        plt.title(f'{self.model_name} Accuracy')
-        plt.xlabel('Epoch')
+        plt.plot(self.history["train_acc"], label="Train Accuracy")
+        plt.plot(self.history["val_acc"], label="Val Accuracy")
+        plt.title(f"{self.model_name} Accuracy")
+        plt.xlabel("Epoch")
         plt.legend()
-        
+
         plt.tight_layout()
-        plt.savefig(f'models/{self.model_name}/{self.model_name}training_curves.png')
+        plot_path = os.path.join(self.model_dir, f"{self.model_name}_training_curves_epoch_{epoch}.png")
+        plt.savefig(plot_path)
         plt.close()
+
+        if os.path.exists(self.best_eval_file):
+            best_acc = self.read_best_eval()
+            current_val_acc = self.history["val_acc"][-1]
+            if current_val_acc >= best_acc:
+                best_plot_path = os.path.join(self.best_model_dir, f"{self.model_name}_training_curves.png")
+                shutil.copy(plot_path, best_plot_path)
+                tqdm.write(f"Copied plot to {best_plot_path}")
