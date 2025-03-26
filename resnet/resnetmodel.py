@@ -182,8 +182,8 @@ class CrossResolution(nn.Module):
 class ResnetClassifier(nn.Module):
     def __init__(self, num_classes, pretrained, use_complex_blocks, in_channels):
         super().__init__()
-        self.base = models.resnet50(
-            weights=models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
+        self.base = models.resnet152(
+            weights=models.ResNet152_Weights.IMAGENET1K_V2 if pretrained else None
         )
         self.spatial_attention = SpatialAttention()
         self.noise_module = NoiseAnalysis(64)

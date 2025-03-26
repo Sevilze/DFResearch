@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from torch import nn
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 class BaseTrainer:
     def __init__(self, model, train_loader, test_loader, epochs, max_lr):
@@ -112,14 +113,14 @@ class BaseTrainer:
             self.update_progress_bar(
                 epoch_pbar, train_loss, train_acc, val_loss, val_acc
             )
-            self.log_to_tensorboard(epoch, train_loss, train_acc, val_loss, val_acc)
+            self.log_tensorboard(epoch, train_loss, train_acc, val_loss, val_acc)
             self.plot_training_curves(epoch)
 
             if val_acc > best_acc:
                 best_acc = val_acc
-                self.write_best_eval(best_acc)
+                self.update_best_eval(best_acc)
                 self.save_model(epoch, best_acc)
-                self.copy_tfoutput_to_best()
+                self.copy_tfoutput()
 
     def update_history(self, train_loss, train_acc, val_loss, val_acc):
         self.history["train_loss"].append(train_loss)
@@ -139,7 +140,7 @@ class BaseTrainer:
             }
         )
 
-    def log_to_tensorboard(self, epoch, train_loss, train_acc, val_loss, val_acc):
+    def log_tensorboard(self, epoch, train_loss, train_acc, val_loss, val_acc):
         self.writer.add_scalar("Loss/Train", train_loss, epoch)
         self.writer.add_scalar("Loss/Validation", val_loss, epoch)
         self.writer.add_scalar("Accuracy/Train", train_acc, epoch)
@@ -175,11 +176,11 @@ class BaseTrainer:
                 return 0
         return 0
 
-    def write_best_eval(self, best_acc):
+    def update_best_eval(self, best_acc):
         with open(self.best_eval_file, "w") as f:
             f.write(f"{best_acc}")
 
-    def copy_tfoutput_to_best(self):
+    def copy_tfoutput(self):
         for file in os.listdir(self.runs_dir):
             if file.startswith("events.out.tfevents"):
                 src = os.path.join(self.runs_dir, file)
@@ -189,23 +190,28 @@ class BaseTrainer:
                 break
 
     def plot_training_curves(self, epoch):
+        if epoch == 0:
+            return
+        
+        epochs_range = range(1, len(self.history["train_loss"]) + 1)
+        
         plt.figure(figsize=(12, 5))
         plt.subplot(1, 2, 1)
-        plt.plot(self.history["train_loss"], label="Train Loss")
-        plt.plot(self.history["val_loss"], label="Val Loss")
+        plt.plot(epochs_range, self.history["train_loss"], label="Train Loss")
+        plt.plot(epochs_range, self.history["val_loss"], label="Val Loss")
         plt.title(f"{self.model_name} Loss")
         plt.xlabel("Epoch")
         plt.legend()
 
         plt.subplot(1, 2, 2)
-        plt.plot(self.history["train_acc"], label="Train Accuracy")
-        plt.plot(self.history["val_acc"], label="Val Accuracy")
+        plt.plot(epochs_range, self.history["train_acc"], label="Train Accuracy")
+        plt.plot(epochs_range, self.history["val_acc"], label="Val Accuracy")
         plt.title(f"{self.model_name} Accuracy")
         plt.xlabel("Epoch")
         plt.legend()
 
         plt.tight_layout()
-        plot_path = os.path.join(self.model_dir, f"{self.model_name}_training_curves_epoch_{epoch}.png")
+        plot_path = os.path.join(self.model_dir, f"{self.model_name}_current_run.png")
         plt.savefig(plot_path)
         plt.close()
 
@@ -213,6 +219,6 @@ class BaseTrainer:
             best_acc = self.read_best_eval()
             current_val_acc = self.history["val_acc"][-1]
             if current_val_acc >= best_acc:
-                best_plot_path = os.path.join(self.best_model_dir, f"{self.model_name}_training_curves.png")
+                best_plot_path = os.path.join(self.best_model_dir, f"{self.model_name}_best_plot.png")
                 shutil.copy(plot_path, best_plot_path)
                 tqdm.write(f"Copied plot to {best_plot_path}")

@@ -3,6 +3,14 @@ import torch
 import numpy as np
 from .dataloader import DataLoaderWrapper
 from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
+from resnet.resnetmodel import ResnetClassifier
+from resnet.trainer import ResnetTrainer
+from densenet.densenetmodel import DensenetClassifier
+from densenet.trainer import DensenetTrainer
+from regnet.regnetmodel import RegnetClassifier
+from regnet.trainer import RegnetTrainer
+from .ensemblemodel import EarlyFusionEnsemble
+from .ensembletrainer import EnsembleTrainer
 
 
 def parse_args():
@@ -11,7 +19,7 @@ def parse_args():
         "--model",
         type=str,
         required=True,
-        choices=["resnet", "densenet"],
+        choices=["resnet", "densenet", "regnet", "ensemble"],
         help="Model training options.",
     )
     parser.add_argument("--epochs", type=int, default=25, help="Number of epochs.")
@@ -31,16 +39,25 @@ def main():
     data_wrapper = DataLoaderWrapper(BATCH_SIZE, RECOMPUTE_NORM)
     train_loader, test_loader = data_wrapper.get_loaders()
 
-    if args.model == "resnet":
-        from resnet.resnetmodel import ResnetClassifier
-        from resnet.trainer import ResnetTrainer
+    resnet_model = ResnetClassifier(
+        num_classes=2,
+        pretrained=True,
+        use_complex_blocks=True,
+        in_channels=data_wrapper.input_channels,
+    )
+    densenet_model = DensenetClassifier(
+        num_classes=2,
+        pretrained=True,
+        in_channels=data_wrapper.input_channels,
+    )
+    regnet_model = RegnetClassifier(
+        num_classes=2,
+        pretrained=True,
+        in_channels=data_wrapper.input_channels,
+    )
 
-        model = ResnetClassifier(
-            num_classes=2,
-            pretrained=True,
-            use_complex_blocks=True,
-            in_channels=data_wrapper.input_channels,
-        )
+    if args.model == "resnet":
+        model = resnet_model
         trainer = ResnetTrainer(
             model=model,
             train_loader=train_loader,
@@ -49,15 +66,38 @@ def main():
             max_lr=args.lr,
         )
     elif args.model == "densenet":
-        from densenet.densenetmodel import DensenetClassifier
-        from densenet.trainer import DensenetTrainer
-
-        model = DensenetClassifier(
-            num_classes=2,
-            pretrained=True,
-            in_channels=data_wrapper.input_channels,
-        )
+        model = densenet_model
         trainer = DensenetTrainer(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            epochs=args.epochs,
+            max_lr=args.lr,
+        )
+    elif args.model == "regnet":
+
+        model = regnet_model
+        trainer = RegnetTrainer(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            epochs=args.epochs,
+            max_lr=args.lr,
+        )
+    elif args.model == "ensemble":
+
+        model = EarlyFusionEnsemble(
+            num_classes=2,
+            in_channels=data_wrapper.input_channels,
+            resnet_model=resnet_model,
+            densenet_model=densenet_model,
+            regnet_model=regnet_model,
+            resnet_path="models/ResnetClassifier/best_model/ResnetClassifier_best.pth",
+            densenet_path="models/DensenetClassifier/best_model/DensenetClassifier_best.pth",
+            regnet_path="models/RegnetClassifier/best_model/RegnetClassifier_best.pth",
+            freeze=True
+        )
+        trainer = EnsembleTrainer(
             model=model,
             train_loader=train_loader,
             test_loader=test_loader,
