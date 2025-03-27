@@ -32,7 +32,7 @@ class BaseTrainer:
             "lr": [],
         }
 
-        self.model_dir = os.path.join("models", self.model_name)
+        self.model_dir = os.path.join("pyproject/models", self.model_name)
         os.makedirs(self.model_dir, exist_ok=True)
         self.runs_dir = os.path.join(self.model_dir, "runs")
         if os.path.exists(self.runs_dir):

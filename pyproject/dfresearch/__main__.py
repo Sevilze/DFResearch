@@ -3,12 +3,12 @@ import torch
 import numpy as np
 from .dataloader import DataLoaderWrapper
 from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
-from resnet.resnetmodel import ResnetClassifier
-from resnet.trainer import ResnetTrainer
-from densenet.densenetmodel import DensenetClassifier
-from densenet.trainer import DensenetTrainer
-from regnet.regnetmodel import RegnetClassifier
-from regnet.trainer import RegnetTrainer
+from ..resnet.resnetmodel import ResnetClassifier
+from ..resnet.trainer import ResnetTrainer
+from ..densenet.densenetmodel import DensenetClassifier
+from ..densenet.trainer import DensenetTrainer
+from ..regnet.regnetmodel import RegnetClassifier
+from ..regnet.trainer import RegnetTrainer
 from .ensemblemodel import EarlyFusionEnsemble
 from .ensembletrainer import EnsembleTrainer
 
@@ -92,9 +92,9 @@ def main():
             resnet_model=resnet_model,
             densenet_model=densenet_model,
             regnet_model=regnet_model,
-            resnet_path="models/ResnetClassifier/best_model/ResnetClassifier_best.pth",
-            densenet_path="models/DensenetClassifier/best_model/DensenetClassifier_best.pth",
-            regnet_path="models/RegnetClassifier/best_model/RegnetClassifier_best.pth",
+            resnet_path="pyproject/models/ResnetClassifier/best_model/ResnetClassifier_best.pth",
+            densenet_path="pyproject/models/DensenetClassifier/best_model/DensenetClassifier_best.pth",
+            regnet_path="pyproject/models/RegnetClassifier/best_model/RegnetClassifier_best.pth",
             freeze=True
         )
         trainer = EnsembleTrainer(

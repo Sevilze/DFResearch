@@ -3,7 +3,6 @@ import torch
 import numpy as np
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
-from .setup import get_dataset_path
 from scipy.fftpack import dctn
 from skimage.filters import sobel
 from skimage.feature import hog
@@ -11,6 +10,7 @@ from skimage.feature import local_binary_pattern
 from skimage.transform import resize
 import pywt
 from tqdm import tqdm
+from .setup import get_dataset_path
 from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
 
 
@@ -270,7 +270,7 @@ class DataLoaderWrapper:
             channels = channel_counts.pop()
             return channels
 
-    def update_config(self, new_channels, config_path="dfresearch\loaderconf.py"):
+    def update_config(self, new_channels, config_path="pyproject\dfresearch\loaderconf.py"):
         if not os.path.exists(config_path):
             print(f"Config file {config_path} not found; skipping update.")
             return
