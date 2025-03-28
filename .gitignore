@@ -3,4 +3,5 @@ __pycache__
 models
 
 # Rust backend
+Cargo.lock
 /target
