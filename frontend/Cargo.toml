@@ -3,11 +3,21 @@ name = "frontend"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
-yew = { version = "0.21.0", features = ["csr"] }
-shared = { path = "../shared" }
+yew = { version = "0.20", features = ["csr"] }
+gloo-net = "0.4"
+serde = { version = "1.0", features = ["derive"] }
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["File", "FormData"] }
+wasm-bindgen-futures = "0.4"
+log = "0.4"
+console_log = "1.0"
+web-sys = { version = "0.3.64", features = [
+    "Window",
+    "Document",
+    "HtmlElement",
+    "HtmlInputElement",
+    "FormData",
+    "File",
+    "Blob",
+    "console"
+]}

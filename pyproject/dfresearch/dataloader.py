@@ -270,7 +270,7 @@ class DataLoaderWrapper:
             channels = channel_counts.pop()
             return channels
 
-    def update_config(self, new_channels, config_path="pyproject\dfresearch\loaderconf.py"):
+    def update_config(self, new_channels, config_path="pyproject/dfresearch/loaderconf.py"):
         if not os.path.exists(config_path):
             print(f"Config file {config_path} not found; skipping update.")
             return

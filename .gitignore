@@ -2,6 +2,7 @@
 __pycache__
 models
 
-# Rust backend
+# Fullstack rust
 Cargo.lock
+dist
 /target

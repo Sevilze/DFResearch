@@ -1,4 +1,4 @@
-use tch::{Device, Tensor, nn::ModuleT};
+use tch::{ Device, Tensor, nn::ModuleT };
 use tch::CModule;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -25,11 +25,11 @@ impl Model {
     pub fn inference(&self, image: &[u8]) -> Result<Vec<f32>, InferenceError> {
         let tensor = self.preprocess(image)?;
         let output = self.model.lock().unwrap().forward_t(&tensor, false);
-        let output_vec = output.
-            to_kind(tch::Kind::Float).
-            view([-1]).
-            try_into().
-            map_err(|e| InferenceError::ModelError(e))?;
+        let output_vec = output
+            .to_kind(tch::Kind::Float)
+            .view([-1])
+            .try_into()
+            .map_err(|e| InferenceError::ModelError(e))?;
         Ok(output_vec)
     }
 

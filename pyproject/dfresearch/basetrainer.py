@@ -120,6 +120,7 @@ class BaseTrainer:
                 best_acc = val_acc
                 self.update_best_eval(best_acc)
                 self.save_model(epoch, best_acc)
+                self.save_scripted_model(epoch, best_acc)
                 self.copy_tfoutput()
 
     def update_history(self, train_loss, train_acc, val_loss, val_acc):
@@ -165,6 +166,17 @@ class BaseTrainer:
         tqdm.write(
             f"New best {self.model_name} accuracy: {best_acc:.2%} (saved to {save_path})"
         )
+
+    def save_scripted_model(self, epoch, best_acc):
+        self.model.eval()
+        try:
+            scripted_model = torch.jit.script(self.model)
+        except Exception as e:
+            print(f"Error scripting the model: {e}")
+            return
+        scripted_model_path = os.path.join(self.best_model_dir, f"{self.model_name}_scripted.pt")
+        scripted_model.save(scripted_model_path)
+        tqdm.write(f"Scripted model saved to {scripted_model_path}")
 
     def read_best_eval(self):
         if os.path.exists(self.best_eval_file):
