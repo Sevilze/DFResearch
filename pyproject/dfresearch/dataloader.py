@@ -10,6 +10,8 @@ from skimage.feature import local_binary_pattern
 from skimage.transform import resize
 import pywt
 from tqdm import tqdm
+from PIL import Image
+import io
 from .setup import get_dataset_path
 from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
 
@@ -147,6 +149,12 @@ class ChannelAugmentation:
 
         fused = torch.cat(channels, dim=0)
         return fused
+
+    def process_image(self, image_bytes):
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = img.resize((224, 224))
+        augmented = self.__call__(img)
+        return augmented.numpy().flatten().tolist()
 
 
 class DataLoaderWrapper:
