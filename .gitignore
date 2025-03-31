@@ -3,6 +3,6 @@ __pycache__
 models
 
 # Fullstack rust
-Cargo.lock
 dist
 /target
+Cargo.lock

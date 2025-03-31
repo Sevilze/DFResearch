@@ -10,6 +10,7 @@ use actix_multipart::Multipart;
 use futures_util::StreamExt;
 use std::io::Write;
 use std::env;
+use shared::InferenceResponse;
 
 #[post("/api/inference")]
 async fn inference_handler(
@@ -30,7 +31,16 @@ async fn inference_handler(
     }
 
     match model.inference(&image_data) {
-        Ok(results) => HttpResponse::Ok().json(results),
+        Ok(predictions) => {
+            let (is_ai, confidence) = model.calculate_result(&predictions);
+            let response = InferenceResponse {
+                predictions,
+                class_labels: vec!["AI Generated".into(), "Human Created".into()],
+                is_ai,
+                confidence,
+            };
+            HttpResponse::Ok().json(response)
+        },
         Err(err) => {
             log::error!("Inference error: {:?}", err);
             HttpResponse::InternalServerError().body("Inference failed.")
@@ -42,11 +52,10 @@ async fn inference_handler(
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // Log the current working directory
     if let Ok(current_dir) = env::current_dir() {
         log::info!("Current working directory: {}", current_dir.display());
     } else {
-        log::error!("Failed to get the current working directory");
+        log::error!("Failed to get the current working directory.");
     }
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");

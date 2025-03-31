@@ -1,5 +1,6 @@
 use tch::{Device, Tensor, nn::ModuleT};
 use tch::CModule;
+use core::num;
 use std::fs;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -7,6 +8,8 @@ use image::io::Reader as ImageReader;
 use pyo3::prelude::*;
 use pyo3::types::{PyModule, PyBytes};
 use pyo3::exceptions::PyException;
+use shared::InferenceResponse;
+use crate::pyprocess::augmentations::preprocess;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -41,59 +44,23 @@ impl Model {
     }
 
     pub fn inference(&self, image: &[u8]) -> Result<Vec<f32>, InferenceError> {
-        let tensor = self.preprocess(image)?;
+        let tensor = preprocess(image)?; // Use the preprocess function from augmentations.rs
         let output = self.model.lock().unwrap().forward_t(&tensor, false);
         let output = output.softmax(-1, tch::Kind::Float);
-        
-        let output_vec = output
-            .to_kind(tch::Kind::Float)
-            .view([-1])
-            .try_into()
-            .map_err(|e| InferenceError::ModelError(e))?;
-        
+        let output_flat = output.to_kind(tch::Kind::Float).view([-1]);
+        let num_elements = output_flat.size()[0] as usize;
+        let mut output_vec = vec![0.0f32; num_elements];
+        output_flat.copy_data(&mut output_vec, num_elements);
         Ok(output_vec)
     }
 
-    fn preprocess(&self, image: &[u8]) -> Result<Tensor, InferenceError> {
-        Python::with_gil(|py| {
-            let sys = py.import("sys")?;
-            let path: &pyo3::types::PyList = sys.getattr("path")?.downcast()?;
-            let abs_path = fs::canonicalize("../pyproject")
-                .map_err(|e| InferenceError::PythonError(e.to_string()))?;
-            path.insert(0, abs_path.to_str().unwrap())?;
-    
-            let dataloader = PyModule::import(py, "dfresearch.dataloader")?;
-            let channel_aug_class = dataloader.getattr("ChannelAugmentation")?;
-            let channel_aug_instance = channel_aug_class.call0()?;
-            let py_image = PyBytes::new(py, image);
-    
-            let nested: Vec<f32> = channel_aug_instance
-                .call_method1("process_image", (py_image,))?
-                .extract()?;
-            
-            let num_channels = self.check_channels(&nested)?;
-            let tensor = Tensor::f_from_slice(&nested)
-                .map_err(|e| InferenceError::ModelError(e))?
-                .view([1, num_channels as i64, 224, 224])
-                .to_kind(tch::Kind::Float);
-    
-            Ok(tensor)
-        })
-    }
-
-    fn check_channels(&self, tensor_data: &[f32]) -> Result<usize, InferenceError> {
-        let expected_spatial: usize = 224 * 224;
-        let total_elements = tensor_data.len();
-    
-        if total_elements % expected_spatial != 0 {
-            return Err(InferenceError::PreprocessingError(format!(
-                "Data size {} not divisible by {} (224x224). Channels: {}",
-                total_elements,
-                expected_spatial,
-                total_elements as f32 / expected_spatial as f32
-            )));
+    pub fn calculate_result(&self, predictions: &[f32]) -> (bool, f32) {
+        if predictions.is_empty() {
+            return (false, 0.0);
         }
-    
-        Ok(total_elements / expected_spatial)
+
+        let confidence = predictions[0] * 100.0;
+        let is_ai = confidence > 50.0;
+        (is_ai, confidence)
     }
 }

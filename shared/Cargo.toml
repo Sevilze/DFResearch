@@ -4,9 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-serde = { version = "^1", features = ["derive"] }
-uuid = { version = "^0.8", features = ["v4", "wasm-bindgen"] }
-strum_macros = "^0.24"
-strum = { version = "^0.24", features = ["derive"] }
-getrandom = { version = "^0.2.5", features = ["js"] }
-derive_more = "^0.99"
+serde = { version = "1.0", features = ["derive"] }

@@ -8,6 +8,7 @@ use crate::pyprocess::model::Model;
 use super::ddb::task_service::TaskService;
 use super::ddb::model::TaskStatus;
 use serde::Serialize;
+use shared::{InferenceRequest, InferenceResponse};
 
 #[derive(Serialize)]
 struct ErrorResponse {
@@ -67,19 +68,26 @@ async fn handle_inference(
     }
 
     match model.inference(&image_data) {
-        Ok(results) => {
+        Ok(predictions) => {
+            let (is_ai, confidence) = model.calculate_result(&predictions);
+            let response = InferenceResponse {
+                predictions,
+                class_labels: vec!["AI Generated".into(), "Human Created".into()],
+                is_ai,
+                confidence,
+            };
             info!("Inference successful for task: {}", task_id);
             let task_service_clone = task_service.clone();
             let task_id_clone = task_id.clone();
-            let results_clone = results.clone();
+            let predictions_clone = response.predictions.clone();
             actix_web::rt::spawn(async move {
-                if let Err(e) = task_service_clone.update_task_result(&task_id_clone, results_clone).await {
+                if let Err(e) = task_service_clone.update_task_result(&task_id_clone, predictions_clone).await {
                     error!("Failed to update task with results: {:?}", e);
                 } else {
                     info!("Task {} updated with results", task_id_clone);
                 }
             });
-            Ok(HttpResponse::Ok().json(results))
+            Ok(HttpResponse::Ok().json(response))
         },
         Err(e) => {
             let error_msg = format!("Model inference error: {:?}", e);
