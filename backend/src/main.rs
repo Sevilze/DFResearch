@@ -2,6 +2,7 @@ mod routes;
 mod ddb;
 mod pyprocess;
 use actix_cors::Cors;
+use actix_files::Files;
 use actix_web::{web, App, HttpServer, post, HttpResponse, Responder};
 use pyprocess::model::Model;
 use routes::configure_routes;
@@ -65,27 +66,29 @@ async fn main() -> std::io::Result<()> {
     log::info!("Initializing DynamoDB task service");
     let task_service = TaskService::new("table_data".to_string())
         .await
-        .expect("Failed to create TaskService");    log::info!("DynamoDB task service initialized");
+        .expect("Failed to create TaskService");
+    log::info!("DynamoDB task service initialized");
 
-        HttpServer::new(move || {
-            App::new()
-                .wrap(
-                    Cors::default()
-                        .allow_any_origin()
-                        .allowed_methods(vec!["GET", "POST", "OPTIONS"])
-                        .allowed_headers(vec![
-                            actix_web::http::header::AUTHORIZATION,
-                            actix_web::http::header::ACCEPT,
-                            actix_web::http::header::CONTENT_TYPE,
-                        ])
-                        .max_age(3600),
-                )
-                .app_data(web::Data::new(model.clone()))
-                .app_data(web::Data::new(task_service.clone()))
-                .configure(routes::configure_routes)
-                .service(inference_handler)
-        })
-        .bind("127.0.0.1:8081")?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allowed_methods(vec!["GET", "POST", "OPTIONS"])
+                    .allowed_headers(vec![
+                        actix_web::http::header::AUTHORIZATION,
+                        actix_web::http::header::ACCEPT,
+                        actix_web::http::header::CONTENT_TYPE,
+                    ])
+                    .max_age(3600),
+            )
+            .app_data(web::Data::new(model.clone()))
+            .app_data(web::Data::new(task_service.clone()))
+            .configure(routes::configure_routes)
+            .service(inference_handler)
+            .service(Files::new("/", "../frontend/dist").index_file("index.html"))
+    })
+    .bind("0.0.0.0:8081")?
+    .run()
+    .await
 }

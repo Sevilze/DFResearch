@@ -1,0 +1,13 @@
+*
+!pyproject/
+!libtorch/
+!backend/
+!frontend/
+!shared
+!Cargo.toml
+!Cargo.lock
+!docker-compose.yml
+!Dockerfile
+!frontend/dist/
+!frontend/index.html
+!fsrequirements.txt

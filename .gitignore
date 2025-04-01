@@ -5,4 +5,5 @@ models
 # Fullstack rust
 dist
 /target
+libtorch
 Cargo.lock
