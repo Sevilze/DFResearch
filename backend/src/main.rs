@@ -10,6 +10,7 @@ use ddb::task_service::TaskService;
 use actix_multipart::Multipart;
 use futures_util::StreamExt;
 use std::io::Write;
+use std::fs;
 use std::env;
 use shared::InferenceResponse;
 
@@ -60,7 +61,9 @@ async fn main() -> std::io::Result<()> {
     }
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let model_path = format!("{}/../pyproject/models/EarlyFusionEnsemble/best_model/EarlyFusionEnsemble_scripted.pt", manifest_dir);
+    let frontend_dir = format!("{}/../frontend", manifest_dir);
+    let dist_dir = format!("{}/../frontend/dist", manifest_dir);
+    let model_path = format!("{}/../pyproject/models/EarlyFusionEnsemble/best_model/EarlyFusionEnsemble_scripted.pt", manifest_dir); 
     let model = Model::new(&model_path);
     
     log::info!("Initializing DynamoDB task service");
@@ -84,9 +87,9 @@ async fn main() -> std::io::Result<()> {
             )
             .app_data(web::Data::new(model.clone()))
             .app_data(web::Data::new(task_service.clone()))
-            .configure(routes::configure_routes)
+            .configure(|cfg| routes::configure_routes(cfg, frontend_dir.clone()))
             .service(inference_handler)
-            .service(Files::new("/", "../frontend/dist").index_file("index.html"))
+            .service(Files::new("/", dist_dir.clone()).index_file("index.html"))
     })
     .bind("0.0.0.0:8081")?
     .run()

@@ -8,7 +8,10 @@ pub fn preprocess(image: &[u8]) -> Result<Tensor, InferenceError> {
     Python::with_gil(|py| {
         let sys = py.import("sys")?;
         let path: &pyo3::types::PyList = sys.getattr("path")?.downcast()?;
-        let abs_path = fs::canonicalize("../pyproject")
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let pyproject_path = format!("{}/../pyproject", manifest_dir);
+        let abs_path = fs::canonicalize(pyproject_path)
             .map_err(|e| InferenceError::PythonError(e.to_string()))?;
         path.insert(0, abs_path.to_str().unwrap())?;
 

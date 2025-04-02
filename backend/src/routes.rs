@@ -15,12 +15,19 @@ struct ErrorResponse {
     error: String,
 }
 
-pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+mod internal {
+    use actix_web::web;
+    use actix_files::Files;
+    pub(super) fn configure_static_files(cfg: &mut web::ServiceConfig, frontend_dir: String) {
+        cfg.service(Files::new("/static", frontend_dir).show_files_listing());
+    }
+}
+
+pub fn configure_routes(cfg: &mut web::ServiceConfig, frontend_dir: String) {
     cfg.service(web::resource("/inference").route(web::post().to(handle_inference)))
-       .service(web::resource("/tasks").route(web::post().to(create_task)))
-       .service(web::resource("/tasks/{task_id}").route(web::get().to(get_task)))
-       .service(web::resource("/").route(web::get().to(index)))
-       .service(Files::new("/static", "../frontend").show_files_listing());
+    .service(web::resource("/tasks").route(web::post().to(create_task)))
+    .service(web::resource("/tasks/{task_id}").route(web::get().to(get_task)));
+    internal::configure_static_files(cfg, frontend_dir);
 }
 
 async fn index() -> impl Responder {

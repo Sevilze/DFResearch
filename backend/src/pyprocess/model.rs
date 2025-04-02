@@ -44,7 +44,7 @@ impl Model {
     }
 
     pub fn inference(&self, image: &[u8]) -> Result<Vec<f32>, InferenceError> {
-        let tensor = preprocess(image)?; // Use the preprocess function from augmentations.rs
+        let tensor = preprocess(image)?;
         let output = self.model.lock().unwrap().forward_t(&tensor, false);
         let output = output.softmax(-1, tch::Kind::Float);
         let output_flat = output.to_kind(tch::Kind::Float).view([-1]);

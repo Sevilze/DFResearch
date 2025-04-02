@@ -90,7 +90,6 @@
     COPY --from=backend-builder /opt/libtorch /opt/libtorch
     COPY --from=backend-builder /usr/src/app/target/release/backend /usr/local/bin/backend
     COPY --from=frontend-builder /usr/src/app/frontend/ ./frontend
-    # COPY --from=frontend-builder /usr/src/app/frontend/dist ./frontend/dist
     
     COPY --from=backend-builder /usr/src/app/backend ./backend
     COPY --from=backend-builder /usr/src/app/pyproject/models /usr/src/app/pyproject/models
