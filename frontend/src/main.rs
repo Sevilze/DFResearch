@@ -4,10 +4,13 @@ use gloo_net::http::Request;
 use js_sys::Date;
 use shared::InferenceResponse;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{ ClipboardEvent, DragEvent, FileList, HtmlInputElement };
 use yew::prelude::*;
+use gloo_timers::callback::Timeout;
 
 // Models
 #[derive(Clone)]
@@ -51,11 +54,35 @@ struct Model {
     is_dragging: bool,
     paste_listener: Option<EventListener>,
     theme: String,
+    future_requests: usize,
 }
 
 // Helper functions
 fn generate_id() -> u64 {
     (Date::new_0().get_time() * 1000.0 + js_sys::Math::random() * 1000.0) as u64
+}
+
+fn debounce<F>(duration: i32, callback: F) -> Callback<MouseEvent>
+where
+    F: Fn() + Clone + 'static,
+{
+    let timeout = Rc::new(RefCell::new(None::<Timeout>));
+    let timeout_clone = Rc::clone(&timeout);
+
+    Callback::from(move |_| {
+        let mut timeout_ref = timeout_clone.borrow_mut();
+
+        if let Some(old_timeout) = timeout_ref.take() {
+            old_timeout.cancel();
+        }
+
+        let inner_callback = callback.clone();
+        let new_timeout = Timeout::new(duration as u32, move || {
+            inner_callback();
+        });
+
+        *timeout_ref = Some(new_timeout);
+    })
 }
 
 // Yew component implementation
@@ -73,6 +100,7 @@ impl Component for Model {
             is_dragging: false,
             paste_listener: None,
             theme: "light".to_string(),
+            future_requests: 0,
         };
 
         let link = ctx.link().clone();
@@ -145,7 +173,7 @@ impl Component for Model {
     }
 }
 
-// Handler nethods
+// Handler methods
 impl Model {
     fn handle_files_added(&mut self, ctx: &Context<Self>, files: Vec<GlooFile>) -> bool {
         let current_count = self.files.len();
@@ -241,6 +269,7 @@ impl Model {
             if let Some(file_data) = self.files.get(&file_id) {
                 self.loading = true;
                 self.error = None;
+                self.future_requests = 1;
                 let file = file_data.file.clone();
 
                 self.send_analysis_request(ctx, file_id, file);
@@ -262,6 +291,7 @@ impl Model {
 
         self.loading = true;
         self.error = None;
+        self.future_requests = self.files.len();
 
         for file_data in self.files.values().cloned().collect::<Vec<_>>() {
             let file = file_data.file.clone();
@@ -274,7 +304,10 @@ impl Model {
 
     fn handle_inference_result(&mut self, file_id: u64, response: InferenceResponse) -> bool {
         self.results.insert(file_id, response);
-        self.loading = false;
+        self.future_requests -= 1;
+        if self.future_requests == 0 {
+            self.loading = false;
+        }
         true
     }
 
@@ -492,7 +525,10 @@ impl Model {
                 <button
                     id="upload-button"
                     class="analyze-btn"
-                    onclick={trigger_file_input.clone()}
+                    onclick={debounce(300, {
+                        let trigger_file_input = trigger_file_input.clone();
+                        move || trigger_file_input.emit(())
+                    })}
                 >
                     <i class="fa-solid fa-upload"></i> {" Select Images"}
                 </button>
@@ -503,7 +539,10 @@ impl Model {
                     ondragover={handle_drag_over}
                     ondragleave={handle_drag_leave}
                     ondrop={handle_drop}
-                    onclick={trigger_file_input}
+                    onclick={debounce(300, {
+                        let trigger_file_input = trigger_file_input.clone();
+                        move || trigger_file_input.emit(())
+                    })}
                 >
                     <div class="upload-placeholder">
                         <i class="fa-solid fa-cloud-arrow-up"></i>
@@ -511,6 +550,13 @@ impl Model {
                         <p class="file-types">{"Supported formats: JPG, PNG, WEBP, GIF"}</p>
                     </div>
                 </div>
+                    { self.render_error_message() }
+                    
+                { if limit_reached {
+                    html! { <p class="limit-reached">{"You have reached the maximum of 15 images."}</p> }
+                } else {
+                    html! {}
+                }}
             </>
         }
     }
@@ -520,7 +566,7 @@ impl Model {
             return html! {};
         }
 
-        let link = ctx.link();
+        let link = ctx.link().clone();
 
         html! {
             <div id="preview-container">
@@ -539,13 +585,20 @@ impl Model {
                     <button
                         class="analyze-btn"
                         style="background-color: var(--danger-color);"
-                        onclick={link.callback(|_| Msg::ClearAllFiles)}
+                        onclick={debounce(300, {
+                            let link = link.clone();
+                            move || link.callback(|_| Msg::ClearAllFiles).emit(())
+                        })}
                     >
                         <i class="fa-solid fa-trash"></i>{" Clear All"}
                     </button>
                     <button
                         class="analyze-btn"
-                        onclick={link.callback(|_| Msg::AnalyzeSelected)}
+                        onclick={debounce(300, {
+                            let link = link.clone();
+                            move || link.callback(|_| Msg::AnalyzeSelected).emit(())
+                        })}
+
                         disabled={self.loading || self.selected_file_id.is_none()}
                     >
                         { self.render_analyze_button_content() }
@@ -553,7 +606,10 @@ impl Model {
                     <button
                         class="analyze-btn"
                         style="background-color: var(--primary-color);"
-                        onclick={link.callback(|_| Msg::AnalyzeAll)}
+                            onclick={debounce(300, {
+                            let link = link.clone();
+                            move || link.callback(|_| Msg::AnalyzeAll).emit(())
+                        })}
                     >
                         <i class="fa-solid fa-magnifying-glass"></i>{" Analyze All"}
                     </button>
