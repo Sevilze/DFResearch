@@ -87,7 +87,6 @@
 
     COPY Cargo.toml Cargo.lock /usr/src/app/
     COPY --from=python-deps /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
-    COPY --from=backend-builder /opt/libtorch /opt/libtorch
     COPY --from=backend-builder /usr/src/app/target/release/backend /usr/local/bin/backend
     COPY --from=frontend-builder /usr/src/app/frontend/ ./frontend
     
