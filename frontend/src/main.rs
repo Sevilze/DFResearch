@@ -38,6 +38,7 @@ enum Msg {
     SetError(Option<String>),
     SetDragging(bool),
     ToggleTheme,
+    PreviewLoaded,
 
     // Input events
     HandleDrop(DragEvent),
@@ -55,6 +56,8 @@ struct Model {
     paste_listener: Option<EventListener>,
     theme: String,
     future_requests: usize,
+    preview_loading: bool,
+    preview_load_timeout: Option<Timeout>,
 }
 
 // Helper functions
@@ -101,6 +104,8 @@ impl Component for Model {
             paste_listener: None,
             theme: "light".to_string(),
             future_requests: 0,
+            preview_loading: false,
+            preview_load_timeout: None,
         };
 
         let link = ctx.link().clone();
@@ -121,7 +126,7 @@ impl Component for Model {
             Msg::FilesAdded(files) => self.handle_files_added(ctx, files),
             Msg::AddPreview(id, url) => self.handle_add_preview(id, url),
             Msg::RemoveFile(id) => self.handle_remove_file(id),
-            Msg::SelectFile(id) => self.handle_select_file(id),
+            Msg::SelectFile(id) => self.handle_select_file(ctx, id),
             Msg::ClearAllFiles => self.handle_clear_all_files(),
 
             // Analysis operations
@@ -138,14 +143,11 @@ impl Component for Model {
                 true
             }
             Msg::SetDragging(is_dragging) => {
-                if self.is_dragging != is_dragging {
-                    self.is_dragging = is_dragging;
-                    true
-                } else {
-                    false
-                }
+                self.is_dragging = is_dragging;
+                true
             }
             Msg::ToggleTheme => self.handle_toggle_theme(),
+            Msg::PreviewLoaded => self.handle_preview_loaded(),
 
             // Input events
             Msg::HandleDrop(event) => self.handle_drop(ctx, event),
@@ -160,9 +162,9 @@ impl Component for Model {
                 { self.render_theme_toggle(ctx) }
 
                 <main class="main-content">
-                    { self.render_upload_section(ctx) }
-                    { self.render_error_message() }
-                    { self.render_results() }
+                { self.render_upload_section(ctx) }
+                { self.render_error_message() }
+                { self.render_results() }
                 </main>
 
                 <footer class="app-footer">
@@ -243,10 +245,22 @@ impl Model {
         }
     }
 
-    fn handle_select_file(&mut self, id: u64) -> bool {
-        if self.files.contains_key(&id) && self.selected_file_id != Some(id) {
+    fn handle_select_file(&mut self, ctx: &Context<Self>, id: u64) -> bool {
+        if self.selected_file_id != Some(id) && self.files.contains_key(&id) {
+            if let Some(timeout) = self.preview_load_timeout.take() {
+                timeout.cancel();
+            }
+
             self.selected_file_id = Some(id);
             self.error = None;
+            self.preview_loading = true;
+
+            let link = ctx.link().clone();
+            let timeout = Timeout::new(0, move || {
+                link.send_message(Msg::PreviewLoaded);
+            });
+            self.preview_load_timeout = Some(timeout);
+
             true
         } else {
             false
@@ -282,13 +296,6 @@ impl Model {
     }
 
     fn handle_analyze_all(&mut self, ctx: &Context<Self>) -> bool {
-        if self.files.len() > 15 {
-            ctx.link().send_message(
-                Msg::SetError(Some("Upload limit exceeded. Maximum of 15 images allowed.".into()))
-            );
-            return false;
-        }
-
         self.loading = true;
         self.error = None;
         self.future_requests = self.files.len();
@@ -308,6 +315,12 @@ impl Model {
         if self.future_requests == 0 {
             self.loading = false;
         }
+        true
+    }
+
+    fn handle_preview_loaded(&mut self) -> bool {
+        self.preview_loading = false;
+        self.preview_load_timeout = None;
         true
     }
 
@@ -341,14 +354,11 @@ impl Model {
     fn handle_paste(&mut self, ctx: &Context<Self>, event: ClipboardEvent) -> bool {
         if let Some(data_transfer) = event.clipboard_data() {
             if let Some(file_list) = data_transfer.files() {
-                if file_list.length() > 0 {
-                    event.prevent_default();
-                    self.process_file_list(ctx, file_list);
-                    return true;
-                }
+                event.prevent_default();
+                self.process_file_list(ctx, file_list);
+                return true;
             }
         }
-
         false
     }
 
@@ -459,7 +469,7 @@ impl Model {
         }
     }
 
-    fn extract_image_files(file_list: web_sys::FileList) -> Vec<GlooFile> {
+    fn extract_image_files(file_list: &FileList) -> Vec<GlooFile> {
         (0..file_list.length())
             .filter_map(|i| file_list.item(i))
             .filter(|file| file.type_().starts_with("image/"))
@@ -477,11 +487,15 @@ impl Model {
         let link = ctx.link();
         let handle_change = link.callback(|e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
-            if let Some(files) = input.files() {
-                let files_to_process = Self::extract_image_files(files);
+            let files = input.files();
+            let files_to_process = files.as_ref().map(Self::extract_image_files).unwrap_or_default();
+        
+            input.set_value("");
+        
+            if !files_to_process.is_empty() {
                 Msg::FilesAdded(files_to_process)
             } else {
-                Msg::SetError(Some("Failed to get files from input".into()))
+                Msg::SetError(Some("No valid image files selected.".into()))
             }
         });
 
@@ -550,13 +564,6 @@ impl Model {
                         <p class="file-types">{"Supported formats: JPG, PNG, WEBP, GIF"}</p>
                     </div>
                 </div>
-                    { self.render_error_message() }
-                    
-                { if limit_reached {
-                    html! { <p class="limit-reached">{"You have reached the maximum of 15 images."}</p> }
-                } else {
-                    html! {}
-                }}
             </>
         }
     }
@@ -619,19 +626,34 @@ impl Model {
     }
 
     fn render_selected_image_preview(&self) -> Html {
-        if
-            let Some(url) = self.selected_file_id
-                .and_then(|id| self.files.get(&id))
-                .and_then(|file_data| file_data.preview_url.as_ref())
-        {
-            html! {
-                <img id="actual-image-preview"
-                    src={url.to_string()}
-                    alt="Image Preview"
-                    style="max-width:100%; max-height: 400px; object-fit: contain; margin-bottom: 10px;" />
+        match self.selected_file_id {
+            Some(_id) if self.preview_loading => html! {
+                <div style="display: flex; justify-content: center; align-items: center; height: 400px; margin-bottom: 10px; border: 1px dashed var(--text-color); border-radius: 4px;">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
+                    <p style="margin-left: 10px;">{"Loading preview..."}</p>
+                </div>
+            },
+            Some(id) => {
+                if let Some(url) = self.files.get(&id).and_then(|fd| fd.preview_url.as_ref()) {
+                    html! {
+                        <img id="actual-image-preview"
+                            src={url.to_string()}
+                            alt="Image Preview"
+                            style="max-width:100%; max-height: 400px; object-fit: contain; margin-bottom: 10px;" />
+                    }
+                } else {
+                     html! {
+                         <div style="display: flex; justify-content: center; align-items: center; height: 400px; margin-bottom: 10px; border: 1px dashed var(--text-color); border-radius: 4px;">
+                            <p>{"Preview unavailable"}</p>
+                         </div>
+                    }
+                }
+            },
+            None => html! {
+                 <div style="display: flex; justify-content: center; align-items: center; height: 400px; margin-bottom: 10px; border: 1px dashed var(--text-color); border-radius: 4px;">
+                    <p>{"Select an image preview below"}</p>
+                 </div>
             }
-        } else {
-            html! {}
         }
     }
 
@@ -713,10 +735,9 @@ impl Model {
 
                 let confidence = results.predictions[predicted_class] * 100.0;
                 let is_ai = predicted_class == 0;
-                let analyzed_filename = self.files
-                    .get(&selected_id)
-                    .map(|fd| fd.file.name())
-                    .unwrap_or_else(|| "Analyzed Image".to_string());
+                let analyzed_filename = self.files.get(&selected_id)
+                    .map_or_else(|| "Analyzed Image".to_string(), |fd| fd.file.name());
+
 
                 html! {
                     <div class={classes!("results-container", if is_ai { "ai-detected" } else { "not-ai" })}>
