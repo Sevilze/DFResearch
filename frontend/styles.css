@@ -204,7 +204,7 @@ input[type="file"] {
 
 #actual-image-preview {
     width: 100%;
-    max-width: 600px;
+    max-width: 100%;
     border: 2px dashed var(--border-color);
     border-radius: 12px;
     padding: 2rem;
@@ -244,34 +244,34 @@ input[type="file"] {
     object-fit: contain;
 }
 
-.clear-btn {
-    position: absolute;
-    top: 0.75rem;
-    right: 0.75rem;
-    background-color: rgba(0, 0, 0, 0.6);
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 2.5rem;
-    height: 2.5rem;
+.select-preview {
     display: flex;
-    align-items: center;
     justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s;
-    backdrop-filter: blur(4px);
-}
-
-.clear-btn:hover {
-    background-color: var(--danger-color);
-}
-
-.file-info {
-    display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.9rem;
-    color: var(--text-muted);
+    height: 400px;
+    margin-bottom: 10px;
+    border: 1px dashed var(--text-color);
+    border-radius: 4px;
+}
+
+.loading-preview {
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    height: 400px; 
+    margin-bottom: 10px; 
+    border: 1px dashed var(--text-color); 
+    border-radius: 4px;
+}
+
+.unavailable-preview {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 400px;
+    margin-bottom: 10px;
+    border: 1px dashed var(--text-color);
+    border-radius: 4px;
 }
 
 /* Buttons */
@@ -282,6 +282,7 @@ input[type="file"] {
     gap: 1rem;
     width: 100%;
     margin-top: 2rem;
+    flex-wrap: wrap;
 }
 
 .analyze-btn {
@@ -310,6 +311,36 @@ input[type="file"] {
 .analyze-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+.clear-btn {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    backdrop-filter: blur(4px);
+}
+
+.clear-btn:hover {
+    background-color: var(--danger-color);
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
 }
 
 /* Error messages */
@@ -557,6 +588,8 @@ input[type="file"] {
 
 #preview-container {
     margin-top: 1.5rem;
+    margin-left: auto;
+    margin-right: auto;
     width: 100%;
     max-width: 800px;
 }
