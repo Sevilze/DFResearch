@@ -1,16 +1,15 @@
 mod routes;
-mod ddb;
 mod pyprocess;
+mod db;
+
 use actix_cors::Cors;
 use actix_files::Files;
 use actix_web::{web, App, HttpServer, post, HttpResponse, Responder};
 use pyprocess::model::Model;
 use routes::configure_routes;
-use ddb::task_service::TaskService;
+use db::task_repository::TaskRepository;
 use actix_multipart::Multipart;
 use futures_util::StreamExt;
-use std::io::Write;
-use std::fs;
 use std::env;
 use shared::InferenceResponse;
 
@@ -52,25 +51,21 @@ async fn inference_handler(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
-
-    if let Ok(current_dir) = env::current_dir() {
-        log::info!("Current working directory: {}", current_dir.display());
-    } else {
-        log::error!("Failed to get the current working directory.");
-    }
 
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let frontend_dir = format!("{}/../frontend", manifest_dir);
     let dist_dir = format!("{}/../frontend/dist", manifest_dir);
     let model_path = format!("{}/../pyproject/models/EarlyFusionEnsemble/best_model/EarlyFusionEnsemble_scripted.pt", manifest_dir); 
     let model = Model::new(&model_path);
-    
-    log::info!("Initializing DynamoDB task service");
-    let task_service = TaskService::new("table_data".to_string())
+
+    dotenv::dotenv().ok();
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let db_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
         .await
-        .expect("Failed to create TaskService");
-    log::info!("DynamoDB task service initialized");
+        .expect("Failed to connect to database");
+    let task_repo = TaskRepository::new(db_pool.clone());
 
     HttpServer::new(move || {
         App::new()
@@ -86,8 +81,8 @@ async fn main() -> std::io::Result<()> {
                     .max_age(3600),
             )
             .app_data(web::Data::new(model.clone()))
-            .app_data(web::Data::new(task_service.clone()))
-            .configure(|cfg| routes::configure_routes(cfg, frontend_dir.clone()))
+            .app_data(web::Data::new(task_repo.clone()))
+            .configure(|cfg| configure_routes(cfg, frontend_dir.clone()))
             .service(inference_handler)
             .service(Files::new("/", dist_dir.clone()).index_file("index.html"))
     })

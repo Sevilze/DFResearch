@@ -3,6 +3,7 @@ __pycache__
 models
 
 # Fullstack rust
+.sqlx
 dist
 /target
 libtorch

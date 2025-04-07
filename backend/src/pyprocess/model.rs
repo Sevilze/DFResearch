@@ -1,14 +1,8 @@
-use tch::{Device, Tensor, nn::ModuleT};
+use tch::{Device, nn::ModuleT};
 use tch::CModule;
-use core::num;
-use std::fs;
 use std::sync::Arc;
 use std::sync::Mutex;
-use image::io::Reader as ImageReader;
 use pyo3::prelude::*;
-use pyo3::types::{PyModule, PyBytes};
-use pyo3::exceptions::PyException;
-use shared::InferenceResponse;
 use crate::pyprocess::augmentations::preprocess;
 
 #[allow(dead_code)]

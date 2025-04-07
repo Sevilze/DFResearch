@@ -1,6 +1,5 @@
 use yew::prelude::*;
 
-/// Renders the application header
 pub fn render_header() -> Html {
     html! {
         <header class="app-header">

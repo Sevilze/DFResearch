@@ -8,6 +8,7 @@ use yew::prelude::*;
 use gloo_timers::callback::Timeout;
 
 mod components;
+mod api;
 use components::header::render_header;
 use components::theme_toggle::render_theme_toggle;
 use components::upload_section::render_upload_section;
@@ -15,6 +16,7 @@ use components::preview_area::render_preview_area;
 use components::results::render_results;
 use components::handlers::*;
 use components::utils::render_error_message;
+use api::TaskStatus;
 
 pub struct Model {
     pub files: HashMap<u64, FileData>,
@@ -28,6 +30,7 @@ pub struct Model {
     pub future_requests: usize,
     pub preview_loading: bool,
     pub preview_load_timeout: Option<Timeout>,
+    pub task_map: HashMap<u64, String>,
 }
 
 #[derive(Clone)]
@@ -54,6 +57,7 @@ pub enum Msg {
     SetDragging(bool),
     ToggleTheme,
     PreviewLoaded,
+    SetTaskMap(HashMap<u64, String>),
 
     // Input events
     HandleDrop(DragEvent),
@@ -78,6 +82,7 @@ impl Component for Model {
             future_requests: 0,
             preview_loading: false,
             preview_load_timeout: None,
+            task_map: HashMap::new(),
         };
 
         let link = ctx.link().clone();
@@ -119,6 +124,10 @@ impl Component for Model {
 
             Msg::ToggleTheme => handle_toggle_theme(self),
             Msg::PreviewLoaded => handle_preview_loaded(self),
+            Msg::SetTaskMap(task_map) => {
+                self.task_map = task_map;
+                true
+            }
 
             Msg::HandleDrop(event) => handle_drop(self, ctx, event),
             Msg::HandlePaste(event) => handle_paste(self, ctx, event),
@@ -136,6 +145,18 @@ impl Component for Model {
                 { render_preview_area(self, ctx) }
                 { render_error_message(self) }
                 { render_results(self) }
+                {
+                    if let Some(file_id) = self.selected_file_id {
+                        let task_id_opt = self.task_map.get(&file_id);
+                        if let Some(task_id) = task_id_opt {
+                            html! { <TaskStatus task_id={Some(task_id.clone())} /> }
+                        } else {
+                            html! { <TaskStatus task_id={Option::<String>::None} /> }
+                        }
+                    } else {
+                        html! { <TaskStatus task_id={Option::<String>::None} /> }
+                    }
+                }
                 </main>
 
                 <footer class="app-footer">
@@ -147,7 +168,7 @@ impl Component for Model {
 }
 
 fn main() {
-    wasm_logger::init(wasm_logger::Config::default());
+    wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
     log::info!("App starting...");
     yew::Renderer::<Model>::new().render();
 }

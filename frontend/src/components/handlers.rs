@@ -5,10 +5,8 @@ use crate::components::utils::generate_id;
 use gloo_file::{File as GlooFile, ObjectUrl};
 use shared::InferenceResponse;
 use gloo_timers::callback::Timeout;
-use wasm_bindgen_futures::spawn_local;
 use web_sys::{DragEvent, ClipboardEvent, FileList};
 use gloo_net::http::Request;
-use log;
 
 pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<GlooFile>) -> bool {
     let current_count = model.files.len();
@@ -78,19 +76,71 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     }
 }
 
-pub fn handle_analyze_all(model: &mut Model, ctx: &Context<Model>) -> bool {
-    model.loading = true;
-    model.error = None;
-    model.future_requests = model.files.len();
+pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>) {
+    let link = ctx.link().clone();
 
-    for file_data in model.files.values().cloned().collect::<Vec<_>>() {
-        let file = file_data.file.clone();
-        let file_id = file_data.id;
-        send_analysis_request(ctx, file_id, file);
-    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let form_data = web_sys::FormData::new().unwrap();
 
-    true
+        for file_data in &files {
+            form_data.append_with_blob("image", file_data.file.as_ref()).unwrap();
+        }
+
+        let request = Request::post("/api/inference")
+            .body(form_data)
+            .expect("Failed to build request.");
+
+        match request.send().await {
+            Ok(response) => {
+                if response.ok() {
+                    let text = response.text().await.unwrap_or_default();
+                    match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(json_value) => {
+                            if let Some(results_array) = json_value.get("results").and_then(|v| v.as_array()) {
+                                let mut task_map = std::collections::HashMap::new();
+                                for (file_data, result_value) in files.iter().zip(results_array) {
+                                    if let Some(task_obj) = result_value.get("task") {
+                                        if let Some(task_id) = task_obj.get("id").and_then(|id| id.as_str()) {
+                                            task_map.insert(file_data.id, task_id.to_string());
+                                        }
+                                    }
+                                    if let Some(inf) = result_value.get("inference") {
+                                        match serde_json::from_value::<InferenceResponse>(inf.clone()) {
+                                            Ok(results) => {
+                                                link.send_message(Msg::InferenceResult(file_data.id, results))
+                                            }
+                                            Err(e) => link.send_message(
+                                                Msg::SetError(Some(format!("Failed to parse inference: {}", e)))
+                                            ),
+                                        }
+                                    }
+                                }
+                                link.send_message(Msg::SetTaskMap(task_map));
+                            } else {
+                                link.send_message(
+                                    Msg::SetError(Some("No results array in response.".to_string()))
+                                );
+                            }
+                        }
+                        Err(e) => link.send_message(
+                            Msg::SetError(Some(format!("Failed to parse response: {}", e)))
+                        ),
+                    }
+                } else {
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    link.send_message(
+                        Msg::SetError(Some(format!("Server error: {} - {}", status, body)))
+                    )
+                }
+            }
+            Err(e) => {
+                link.send_message(Msg::SetError(Some(format!("Network error: {}", e))))
+            }
+        }
+    });
 }
+
 
 pub fn handle_inference_result(model: &mut Model, file_id: u64, response: InferenceResponse) -> bool {
     model.results.insert(file_id, response);
@@ -109,7 +159,7 @@ pub fn handle_preview_loaded(model: &mut Model) -> bool {
 
 pub fn handle_toggle_theme(model: &mut Model) -> bool {
     let body = web_sys::window().unwrap().document().unwrap().body().unwrap();
-
+    
     if model.theme == "light" {
         model.theme = "dark".to_string();
         body.class_list().add_1("dark-mode").unwrap();
@@ -117,20 +167,20 @@ pub fn handle_toggle_theme(model: &mut Model) -> bool {
         model.theme = "light".to_string();
         body.class_list().remove_1("dark-mode").unwrap();
     }
-
+    
     true
 }
 
 pub fn handle_drop(model: &mut Model, ctx: &Context<Model>, event: DragEvent) -> bool {
     event.prevent_default();
     model.is_dragging = false;
-
+    
     if let Some(data_transfer) = event.data_transfer() {
         if let Some(file_list) = data_transfer.files() {
             process_file_list(ctx, file_list);
         }
     }
-
+    
     true
 }
 
@@ -153,77 +203,35 @@ pub fn process_file_list(ctx: &Context<Model>, file_list: FileList) {
             if file.type_().starts_with("image/") {
                 files_to_process.push(GlooFile::from(file));
             } else {
-                log::warn!("Skipping non-image file: {}", file.name());
                 ctx.link().send_message(
                     Msg::SetError(Some(format!("Skipped non-image file: {}", file.name())))
                 );
             }
         }
     }
-
+    
     if !files_to_process.is_empty() {
         ctx.link().send_message(Msg::FilesAdded(files_to_process));
     }
 }
 
-pub fn send_analysis_request(ctx: &Context<Model>, file_id: u64, file: GlooFile) {
-    spawn_local({
-        let link = ctx.link().clone();
-
-        async move {
-            let form_data = web_sys::FormData::new().unwrap();
-            form_data.append_with_blob("image", file.as_ref()).unwrap();
-
-            let request = Request::post("/api/inference")
-                .body(form_data)
-                .expect("Failed to build request.");
-
-            match request.send().await {
-                Ok(response) => {
-                    if response.ok() {
-                        match response.json::<InferenceResponse>().await {
-                            Ok(results) => {
-                                link.send_message(Msg::InferenceResult(file_id, results))
-                            }
-                            Err(e) =>
-                                link.send_message(
-                                    Msg::SetError(
-                                        Some(format!("Failed to parse response: {}", e))
-                                    )
-                                ),
-                        }
-                    } else {
-                        let status = response.status();
-                        let body = response.text().await.unwrap_or_default();
-                        link.send_message(
-                            Msg::SetError(Some(format!("Server error: {} - {}", status, body)))
-                        )
-                    }
-                }
-                Err(e) => {
-                    link.send_message(Msg::SetError(Some(format!("Network error: {}", e))))
-                }
-            }
-        }
-    });
-}
 
 pub fn handle_select_file(model: &mut Model, ctx: &Context<Model>, id: u64) -> bool {
     if model.selected_file_id != Some(id) && model.files.contains_key(&id) {
         if let Some(timeout) = model.preview_load_timeout.take() {
             timeout.cancel();
         }
-
+        
         model.selected_file_id = Some(id);
         model.error = None;
         model.preview_loading = true;
-
+        
         let link = ctx.link().clone();
         let timeout = Timeout::new(0, move || {
             link.send_message(Msg::PreviewLoaded);
         });
         model.preview_load_timeout = Some(timeout);
-
+        
         true
     } else {
         false
@@ -247,13 +255,24 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
             model.loading = true;
             model.error = None;
             model.future_requests = 1;
-            let file = file_data.file.clone();
-
-            send_analysis_request(ctx, file_id, file);
+            
+            let files = vec![file_data.clone()];
+            send_inference_request(ctx, files);
             return true;
         }
     }
-
+    
     ctx.link().send_message(Msg::SetError(Some("No file selected for analysis.".into())));
     false
+}
+
+pub fn handle_analyze_all(model: &mut Model, ctx: &Context<Model>) -> bool {
+    model.loading = true;
+    model.error = None;
+    model.future_requests = model.files.len();
+
+    let files: Vec<_> = model.files.values().cloned().collect();
+    send_inference_request(ctx, files);
+
+    true
 }
