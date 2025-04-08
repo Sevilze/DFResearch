@@ -1,12 +1,12 @@
 use yew::prelude::*;
-use super::super::{Model, FileData};
-use super::super::Msg;
-use crate::components::utils::generate_id;
 use gloo_file::{File as GlooFile, ObjectUrl};
 use shared::InferenceResponse;
 use gloo_timers::callback::Timeout;
 use web_sys::{DragEvent, ClipboardEvent, FileList};
 use gloo_net::http::Request;
+use super::super::{Model, FileData};
+use super::super::Msg;
+use super::utils::generate_id;
 
 pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<GlooFile>) -> bool {
     let current_count = model.files.len();

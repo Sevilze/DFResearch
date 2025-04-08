@@ -7,4 +7,5 @@ models
 dist
 /target
 libtorch
+libtorchgpu
 Cargo.lock

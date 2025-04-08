@@ -51,7 +51,14 @@ async fn inference_handler(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
+    if let Ok(current_dir) = env::current_dir() {
+        log::info!("Current working directory: {}", current_dir.display());
+    } else {
+        log::error!("Failed to get the current working directory.");
+    }
+    
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let frontend_dir = format!("{}/../frontend", manifest_dir);
     let dist_dir = format!("{}/../frontend/dist", manifest_dir);

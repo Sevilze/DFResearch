@@ -1,9 +1,9 @@
 use yew::prelude::*;
-use super::super::Model;
 use std::rc::Rc;
 use std::cell::RefCell;
 use js_sys::Date;
 use gloo_timers::callback::Timeout;
+use super::super::Model;
 
 pub fn generate_id() -> u64 {
     (Date::new_0().get_time() * 1000.0 + js_sys::Math::random() * 1000.0) as u64

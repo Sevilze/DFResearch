@@ -2,27 +2,13 @@ use tch::{Device, nn::ModuleT};
 use tch::CModule;
 use std::sync::Arc;
 use std::sync::Mutex;
-use pyo3::prelude::*;
-use crate::pyprocess::augmentations::preprocess;
+use super::augmentations::preprocess;
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum InferenceError {
     PreprocessingError(String),
     ModelError(tch::TchError),
-    PythonError(String),
-}
-
-impl From<PyErr> for InferenceError {
-    fn from(err: PyErr) -> Self {
-        InferenceError::PythonError(err.to_string())
-    }
-}
-
-impl From<pyo3::PyDowncastError<'_>> for InferenceError {
-    fn from(err: pyo3::PyDowncastError<'_>) -> Self {
-        InferenceError::PythonError(err.to_string())
-    }
 }
 
 #[derive(Clone)]

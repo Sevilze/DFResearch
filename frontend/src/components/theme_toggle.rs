@@ -1,7 +1,7 @@
 use yew::prelude::*;
+use yew::html::Scope;
 use super::super::Model;
 use super::super::Msg;
-use yew::html::Scope;
 
 pub fn render_theme_toggle(theme: &str, link: &Scope<Model>) -> Html {
     html! {

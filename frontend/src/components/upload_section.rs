@@ -1,10 +1,10 @@
 use yew::prelude::*;
-use super::super::Model;
-use super::super::Msg;
 use gloo_file::File as GlooFile;
 use web_sys::{DragEvent, HtmlInputElement, FileList};
 use wasm_bindgen::JsCast;
-use crate::components::utils::debounce;
+use super::super::Model;
+use super::super::Msg;
+use super::utils::debounce;
 
 pub fn render_upload_section(model: &Model, ctx: &Context<Model>) -> Html {
     let limit_reached = model.files.len() >= 15;

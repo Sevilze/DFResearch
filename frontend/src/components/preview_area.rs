@@ -1,7 +1,7 @@
 use yew::prelude::*;
 use super::super::{ Model, FileData };
 use super::super::Msg;
-use crate::components::utils::debounce;
+use super::utils::debounce;
 
 pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
     if model.files.is_empty() {
