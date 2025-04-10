@@ -1,11 +1,14 @@
 .vscode
+.venv
 __pycache__
 models
 
 # Fullstack rust
+.env
 .sqlx
 dist
 /target
 libtorch
 libtorchgpu
+shell_scripts
 Cargo.lock

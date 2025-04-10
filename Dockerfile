@@ -1,109 +1,97 @@
-# Python Dependencies
-    FROM rust:latest AS python-deps
-    WORKDIR /usr/src/app
-    
-    RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.11 python3.11-dev python3-pip \
-        build-essential pkg-config \
-        libjpeg-dev zlib1g-dev \
-        libopenblas-dev libfftw3-dev \
-        libstdc++6 libgomp1 \
-        && rm -rf /var/lib/apt/lists/*
-    
-    ADD fsrequirements.txt /usr/src/app/fsrequirements.txt
-    
-    RUN --mount=type=cache,target=/root/.cache/pip \
-        pip3 install --upgrade pip --break-system-packages && \
-        pip3 install -r fsrequirements.txt \
-            --extra-index-url https://download.pytorch.org/whl/cu126 \
-            --break-system-packages
-    
-    
-    # Build the Rust backend
-    FROM python-deps AS backend-builder
-    WORKDIR /usr/src/app
-    
-    RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.11 python3.11-dev python3-pip \
-        && rm -rf /var/lib/apt/lists/*
-    
-    ENV PYTHON_LIB_DIR=/usr/local/lib/python3.11/dist-packages
-    ENV LIBTORCH=/usr/local/lib/python3.11/dist-packages/torch
-    ENV LIBTORCH_LIB=/usr/local/lib/python3.11/dist-packages/torch
-    ENV LIBTORCH_USE_PYTORCH=1
-    ENV LD_LIBRARY_PATH=$LIBTORCH/lib:$PYTHON_LIB_DIR:$LD_LIBRARY_PATH
-    ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-    ENV TORCH_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=1"
-    
-    COPY libtorch /opt/libtorch/
-    
-    COPY Cargo.toml Cargo.lock ./
-    COPY backend ./backend
-    COPY frontend ./frontend
-    COPY shared ./shared
-    COPY pyproject/dfresearch /usr/src/app/pyproject/dfresearch
-    COPY pyproject/models /usr/src/app/pyproject/models
-    
-    RUN cd backend && cargo build --release -p backend
-    
-    
-    # Build the frontend
-    FROM backend-builder AS frontend-builder
-    WORKDIR /usr/src/app
-    ENV CARGO_JOBS=1
-    RUN rustup target add wasm32-unknown-unknown && \
-        cargo install trunk
-    
-    COPY Cargo.toml Cargo.lock ./
-    COPY backend ./backend
-    COPY frontend ./frontend
-    COPY shared ./shared
-    
-    ENV PYTHON_LIB_DIR=/usr/local/lib/python3.11/dist-packages
-    ENV LIBTORCH=/usr/local/lib/python3.11/dist-packages/torch
-    ENV LIBTORCH_LIB=/usr/local/lib/python3.11/dist-packages/torch
-    ENV LIBTORCH_USE_PYTORCH=1
-    ENV LD_LIBRARY_PATH=$LIBTORCH/lib:$PYTHON_LIB_DIR:$LD_LIBRARY_PATH
-    ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-    ENV TORCH_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=1"
-    
-    RUN cd frontend && trunk build --release
-    
-    
-    # Final runtime image
-    FROM debian:latest AS final
-    WORKDIR /usr/src/app
-    
-    # Install runtime dependencies
-    RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.11 libpython3.11 \
-        libstdc++6 libgcc-s1 \
-        libssl-dev ca-certificates \
-        libgomp1 libjpeg62-turbo zlib1g \
-        libopenblas0 libfftw3-double3 \
-        && rm -rf /var/lib/apt/lists/*
-    
-    RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+FROM debian:bookworm-slim AS builder
+WORKDIR /usr/src/app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    git \
+    libfftw3-dev \
+    libjpeg-dev \
+    libopenblas-dev \
+    libssl-dev \
+    pkg-config \
+    zlib1g-dev
 
-    COPY Cargo.toml Cargo.lock /usr/src/app/
-    COPY --from=python-deps /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
-    COPY --from=backend-builder /usr/src/app/target/release/backend /usr/local/bin/backend
-    COPY --from=frontend-builder /usr/src/app/frontend/ ./frontend
-    
-    COPY --from=backend-builder /usr/src/app/backend ./backend
-    COPY --from=backend-builder /usr/src/app/pyproject/models /usr/src/app/pyproject/models
-    COPY --from=backend-builder /usr/src/app/pyproject/dfresearch /usr/src/app/pyproject/dfresearch
-    
-    ENV PYTHON_LIB_DIR=/usr/local/lib/python3.11/dist-packages
-    ENV LIBTORCH=/usr/local/lib/python3.11/dist-packages/torch
-    ENV LIBTORCH_LIB=/usr/local/lib/python3.11/dist-packages/torch
-    ENV LIBTORCH_USE_PYTORCH=1
-    ENV LD_LIBRARY_PATH=$LIBTORCH/lib:$PYTHON_LIB_DIR:$LD_LIBRARY_PATH
-    ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
-    ENV PYTHONPATH=/usr/src/app
-    ENV TORCH_CXX_FLAGS="-D_GLIBCXX_USE_CXX11_ABI=1"
-    ENV CXXFLAGS="-std=c++17"
-    
-    EXPOSE 8081
-    CMD ["/usr/local/bin/backend"]
-    
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y && \
+    . $HOME/.cargo/env && \
+    rustup default stable
+
+FROM builder AS backend-builder
+ARG LIBTORCH
+ARG LIBTORCH_LIB
+ARG LD_LIBRARY_PATH
+ARG CXXFLAGS
+ARG CARGO_JOBS
+
+ENV LIBTORCH=${LIBTORCH}
+ENV LIBTORCH_LIB=${LIBTORCH_LIB}
+ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
+ENV CXXFLAGS=${CXXFLAGS}
+
+COPY libtorch /opt/libtorch
+COPY Cargo.toml Cargo.lock ./
+COPY backend ./backend
+COPY frontend ./frontend
+COPY shared ./shared
+COPY pyproject/dfresearch /usr/src/app/pyproject/dfresearch
+COPY pyproject/models /usr/src/app/pyproject/models
+
+RUN --mount=type=secret,id=dburl \
+    export DATABASE_URL=$(cat /run/secrets/dburl) && \
+    . $HOME/.cargo/env && cd backend && cargo build --release -p backend
+
+FROM backend-builder AS frontend-builder
+RUN . $HOME/.cargo/env && rustup target add wasm32-unknown-unknown && cargo install trunk
+
+COPY Cargo.toml Cargo.lock ./
+COPY backend ./backend
+COPY frontend ./frontend
+COPY shared ./shared
+
+RUN cd frontend && trunk build --release
+
+FROM debian:bookworm-slim AS final
+WORKDIR /usr/src/app
+
+ARG LIBTORCH
+ARG LIBTORCH_LIB
+ARG LD_LIBRARY_PATH
+ARG CXXFLAGS
+
+ENV LIBTORCH=${LIBTORCH}
+ENV LIBTORCH_LIB=${LIBTORCH_LIB}
+ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
+ENV CXXFLAGS=${CXXFLAGS}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    libfftw3-double3 \
+    libgcc-s1 \
+    libjpeg62-turbo \
+    libopenblas0 \
+    libssl-dev \
+    libstdc++6 \
+    zlib1g
+
+RUN curl https://pkg.cloudflareclient.com/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list && \
+    apt-get update && apt-get install -y cloudflare-warp && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY libtorch /opt/libtorch
+COPY Cargo.toml Cargo.lock /usr/src/app/
+COPY --from=frontend-builder /usr/src/app/frontend/ ./frontend
+COPY --from=backend-builder /usr/src/app/target/release/backend /usr/local/bin/backend
+COPY --from=backend-builder /usr/src/app/frontend/ ./frontend
+COPY --from=backend-builder /usr/src/app/backend ./backend
+COPY --from=backend-builder /usr/src/app/pyproject/models /usr/src/app/pyproject/models
+COPY --from=backend-builder /usr/src/app/pyproject/dfresearch /usr/src/app/pyproject/dfresearch
+
+EXPOSE 8081
+CMD ["/usr/local/bin/backend"]

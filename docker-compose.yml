@@ -1,10 +1,20 @@
-version: '3.8'
-
 services:
   app:
     image: dfresearch:latest
     ports:
       - "8081:8081"
+    env_file:
+      - .env
     environment:
-      - RUST_LOG=info
+      - DATABASE_URL=${DATABASE_URL}
     restart: unless-stopped
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    enable_ipv6: true
+    driver: bridge
+    ipam:
+      config:
+         - subnet: 2001:db8::/64
