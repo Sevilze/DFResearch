@@ -1,5 +1,5 @@
 use gloo_events::EventListener;
-use gloo_file::{ File as GlooFile, ObjectUrl };
+use gloo_file::{File as GlooFile, ObjectUrl};
 use shared::InferenceResponse;
 use std::collections::HashMap;
 use wasm_bindgen::JsCast;
@@ -39,32 +39,26 @@ pub struct FileData {
     pub file: GlooFile,
     pub preview_url: Option<ObjectUrl>,
 }
+
 pub enum Msg {
-    // File operations
     FilesAdded(Vec<GlooFile>),
     AddPreview(u64, ObjectUrl),
     RemoveFile(u64),
     SelectFile(u64),
     ClearAllFiles,
-
-    // Analysis operations
+    InternalExecuteClearAll,
     AnalyzeSelected,
     AnalyzeAll,
     InferenceResult(u64, InferenceResponse),
-
-    // UI states
     SetError(Option<String>),
     SetDragging(bool),
     ToggleTheme,
     PreviewLoaded,
     SetTaskMap(HashMap<u64, String>),
-
-    // Input events
     HandleDrop(DragEvent),
     HandlePaste(ClipboardEvent),
 }
 
-// Yew component implementation
 impl Component for Model {
     type Message = Msg;
     type Properties = ();
@@ -103,34 +97,28 @@ impl Component for Model {
             Msg::AddPreview(id, url) => handle_add_preview(self, id, url),
             Msg::RemoveFile(id) => handle_remove_file(self, id),
             Msg::SelectFile(id) => handle_select_file(self, ctx, id),
-            Msg::ClearAllFiles => handle_clear_all_files(self),
-
+            Msg::ClearAllFiles => handle_clear_all_files(self, ctx),
             Msg::AnalyzeSelected => handle_analyze_selected(self, ctx),
             Msg::AnalyzeAll => handle_analyze_all(self, ctx),
-            Msg::InferenceResult(file_id, response) => {
-                handle_inference_result(self, file_id, response)
-            }
-
+            Msg::InferenceResult(file_id, response) => handle_inference_result(self, file_id, response),
             Msg::SetError(error) => {
                 self.error = error;
                 self.loading = false;
                 true
             }
-
             Msg::SetDragging(is_dragging) => {
                 self.is_dragging = is_dragging;
                 true
             }
-
             Msg::ToggleTheme => handle_toggle_theme(self),
             Msg::PreviewLoaded => handle_preview_loaded(self),
             Msg::SetTaskMap(task_map) => {
                 self.task_map = task_map;
                 true
             }
-
             Msg::HandleDrop(event) => handle_drop(self, ctx, event),
             Msg::HandlePaste(event) => handle_paste(self, ctx, event),
+            Msg::InternalExecuteClearAll => handle_internal_execute_clear_all(self),
         }
     }
 
@@ -139,26 +127,24 @@ impl Component for Model {
             <div class="container">
                 { render_header() }
                 { render_theme_toggle(&self.theme, ctx.link()) }
-
                 <main class="main-content">
-                { render_upload_section(self, ctx) }
-                { render_preview_area(self, ctx) }
-                { render_error_message(self) }
-                { render_results(self) }
-                {
-                    if let Some(file_id) = self.selected_file_id {
-                        let task_id_opt = self.task_map.get(&file_id);
-                        if let Some(task_id) = task_id_opt {
-                            html! { <TaskStatus task_id={Some(task_id.clone())} /> }
+                    { render_upload_section(self, ctx) }
+                    { render_preview_area(self, ctx) }
+                    { render_error_message(self) }
+                    { render_results(self) }
+                    {
+                        if let Some(file_id) = self.selected_file_id {
+                            let task_id_opt = self.task_map.get(&file_id);
+                            if let Some(task_id) = task_id_opt {
+                                html! { <TaskStatus task_id={Some(task_id.clone())} /> }
+                            } else {
+                                html! { <TaskStatus task_id={Option::<String>::None} /> }
+                            }
                         } else {
                             html! { <TaskStatus task_id={Option::<String>::None} /> }
                         }
-                    } else {
-                        html! { <TaskStatus task_id={Option::<String>::None} /> }
                     }
-                }
                 </main>
-
                 <footer class="app-footer">
                     <p>{"Multi-Image Upload Demo | Fullstack Rust WASM"}</p>
                 </footer>

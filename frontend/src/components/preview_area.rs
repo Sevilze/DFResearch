@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use super::super::{ Model, FileData };
+use super::super::{Model, FileData};
 use super::super::Msg;
 use super::utils::debounce;
 
@@ -19,22 +19,23 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                     let mut sorted_files: Vec<&FileData> = model.files.values().collect();
                     sorted_files.sort_by_key(|fd| fd.id);
                     sorted_files.iter()
-                    .map(|file_data| render_preview_item(ctx, model, file_data))
+                        .map(|file_data| render_preview_item(ctx, model, file_data))
                         .collect::<Html>()
-                    }}
-                    </div>
-                    <div class="button-container">
-                    <button
+                }}
+            </div>
+            <div class="button-container">
+                <button
+                    id="clear-all-btn"
                     class="analyze-btn"
                     style="background-color: var(--danger-color);"
                     onclick={debounce(300, {
                         let link = link.clone();
-                        move || link.callback(|_| Msg::ClearAllFiles).emit(())
+                        move || link.send_message(Msg::ClearAllFiles)
                     })}
-                    >
+                >
                     <i class="fa-solid fa-trash"></i>{" Clear All"}
-                    </button>
-                    <button
+                </button>
+                <button
                     class="analyze-btn"
                     onclick={debounce(300, {
                         let link = link.clone();
@@ -51,7 +52,7 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                         let link = link.clone();
                         move || link.callback(|_| Msg::AnalyzeAll).emit(())
                     })}
-                    >
+                >
                     <i class="fa-solid fa-magnifying-glass"></i>{" Analyze All"}
                 </button>
             </div>
@@ -65,20 +66,19 @@ fn render_preview_item(ctx: &Context<Model>, model: &Model, file_data: &FileData
     let is_selected = model.selected_file_id == Some(file_id);
 
     html! {
-            <div
-                class={classes!("preview-item", is_selected.then_some("selected"))}
-                key={file_id.to_string()}
-                onclick={link.callback(move |_| Msg::SelectFile(file_id))}
-                style={if is_selected { "border: 2px solid var(--primary-color); box-shadow: 0 0 8px var(--primary-color);" } else { "" }}
-                title={format!("Click to select for analysis: {}", file_data.file.name())}
-            >
-                {
-                    if let Some(url) = &file_data.preview_url {
-                        html! { <img src={url.to_string()} alt={file_data.file.name()} /> }
-                    } else {
-                        html! { <div class="preview-placeholder" style="height: 120px; display: flex; align-items: center; justify-content: center;">{"..."}</div> }
-                    }
+        <div
+            class={classes!("preview-item", is_selected.then_some("selected"))}
+            key={file_id.to_string()}
+            onclick={link.callback(move |_| Msg::SelectFile(file_id))}
+            title={format!("Click to select for analysis: {}", file_data.file.name())}
+        >
+            {
+                if let Some(url) = &file_data.preview_url {
+                    html! { <img src={url.to_string()} alt={file_data.file.name()} /> }
+                } else {
+                    html! { <div class="preview-placeholder preview-placeholder-centered">{"..."}</div> }
                 }
+            }
             <button
                 class="remove-btn"
                 title="Remove this image"
@@ -95,9 +95,8 @@ fn render_preview_item(ctx: &Context<Model>, model: &Model, file_data: &FileData
 
 fn render_selected_image_preview(model: &Model) -> Html {
     match model.selected_file_id {
-        Some(_id) if model.preview_loading =>
-            html! {
-            <div style="display: flex; justify-content: center; align-items: center; height: 400px; margin-bottom: 10px; border: 1px dashed var(--text-color); border-radius: 4px;">
+        Some(_id) if model.preview_loading => html! {
+            <div class="loading-preview">
                 <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
                 <p style="margin-left: 10px;">{"Loading preview..."}</p>
             </div>
@@ -107,20 +106,18 @@ fn render_selected_image_preview(model: &Model) -> Html {
                 html! {
                     <img id="actual-image-preview"
                         src={url.to_string()}
-                        alt="Image Preview"
-                        style="max-width:100%; max-height: 400px; object-fit: contain; margin-bottom: 10px;" />
+                        alt="Image Preview" />
                 }
             } else {
                 html! {
-                    <div style="display: flex; justify-content: center; align-items: center; height: 400px; margin-bottom: 10px; border: 1px dashed var(--text-color); border-radius: 4px;">
+                    <div class="unavailable-preview">
                         <p>{"Preview unavailable"}</p>
                     </div>
                 }
             }
         }
-        None =>
-            html! {
-            <div style="display: flex; justify-content: center; align-items: center; height: 400px; margin-bottom: 10px; border: 1px dashed var(--text-color); border-radius: 4px;">
+        None => html! {
+            <div class="select-preview">
                 <p>{"Select an image preview below"}</p>
             </div>
         },

@@ -24,19 +24,21 @@ js-sys = "0.3"
 web-sys = { version = "0.3.77", features = [
     "Window",
     "Document",
-    "HtmlElement", # Already present
-    "HtmlInputElement", # Already present
-    "FormData", # Already present
-    "File", # Already present
-    "FileList", # Added
-    "Blob", # Already present
-    "Url", # Already present
-    "DragEvent", # Added
-    "DataTransfer", # Added
-    "ClipboardEvent", # Added
-    "EventTarget", # Added
-    "Event", # Added
-    "MouseEvent", # Added
+    "HtmlElement",
+    "Element",
+    "DomRect",
+    "HtmlInputElement",
+    "FormData",
+    "File",
+    "FileList",
+    "Blob",
+    "Url",
+    "DragEvent",
+    "DataTransfer",
+    "ClipboardEvent",
+    "EventTarget",
+    "Event",
+    "MouseEvent",
     "HtmlElement",
     "HtmlInputElement",
     "FormData",

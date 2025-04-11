@@ -4,8 +4,8 @@ use shared::InferenceResponse;
 use gloo_timers::callback::Timeout;
 use web_sys::{DragEvent, ClipboardEvent, FileList};
 use gloo_net::http::Request;
-use super::super::{Model, FileData};
-use super::super::Msg;
+use wasm_bindgen::JsCast;
+use super::super::{Model, FileData, Msg};
 use super::utils::generate_id;
 
 pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<GlooFile>) -> bool {
@@ -141,7 +141,6 @@ pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>) {
     });
 }
 
-
 pub fn handle_inference_result(model: &mut Model, file_id: u64, response: InferenceResponse) -> bool {
     model.results.insert(file_id, response);
     model.future_requests -= 1;
@@ -159,7 +158,7 @@ pub fn handle_preview_loaded(model: &mut Model) -> bool {
 
 pub fn handle_toggle_theme(model: &mut Model) -> bool {
     let body = web_sys::window().unwrap().document().unwrap().body().unwrap();
-    
+
     if model.theme == "light" {
         model.theme = "dark".to_string();
         body.class_list().add_1("dark-mode").unwrap();
@@ -167,20 +166,20 @@ pub fn handle_toggle_theme(model: &mut Model) -> bool {
         model.theme = "light".to_string();
         body.class_list().remove_1("dark-mode").unwrap();
     }
-    
+
     true
 }
 
 pub fn handle_drop(model: &mut Model, ctx: &Context<Model>, event: DragEvent) -> bool {
     event.prevent_default();
     model.is_dragging = false;
-    
+
     if let Some(data_transfer) = event.data_transfer() {
         if let Some(file_list) = data_transfer.files() {
             process_file_list(ctx, file_list);
         }
     }
-    
+
     true
 }
 
@@ -209,36 +208,114 @@ pub fn process_file_list(ctx: &Context<Model>, file_list: FileList) {
             }
         }
     }
-    
+
     if !files_to_process.is_empty() {
         ctx.link().send_message(Msg::FilesAdded(files_to_process));
     }
 }
-
 
 pub fn handle_select_file(model: &mut Model, ctx: &Context<Model>, id: u64) -> bool {
     if model.selected_file_id != Some(id) && model.files.contains_key(&id) {
         if let Some(timeout) = model.preview_load_timeout.take() {
             timeout.cancel();
         }
-        
+
         model.selected_file_id = Some(id);
         model.error = None;
         model.preview_loading = true;
-        
+
         let link = ctx.link().clone();
         let timeout = Timeout::new(0, move || {
             link.send_message(Msg::PreviewLoaded);
         });
         model.preview_load_timeout = Some(timeout);
-        
+
         true
     } else {
         false
     }
 }
 
-pub fn handle_clear_all_files(model: &mut Model) -> bool {
+pub fn handle_clear_all_files(_model: &mut Model, ctx: &Context<Model>) -> bool {
+    let window = match web_sys::window() {
+        Some(win) => win,
+        None => {
+            ctx.link().send_message(Msg::InternalExecuteClearAll);
+            return false;
+        }
+    };
+    let document = match window.document() {
+        Some(doc) => doc,
+        None => {
+            ctx.link().send_message(Msg::InternalExecuteClearAll);
+            return false;
+        }
+    };
+    let body = match document.body() {
+        Some(b) => b,
+        None => {
+            ctx.link().send_message(Msg::InternalExecuteClearAll);
+            return false;
+        }
+    };
+
+    let button_element = document.get_element_by_id("clear-all-btn").and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+    let (button_x, button_y) = match button_element {
+        Some(btn) => {
+            let rect = btn.get_bounding_client_rect();
+            (rect.left() + rect.width() / 2.0, rect.top() + rect.height() / 2.0)
+        }
+        None => {
+            let win_width = window.inner_width().unwrap().as_f64().unwrap_or(0.0);
+            let win_height = window.inner_height().unwrap().as_f64().unwrap_or(0.0);
+            (win_width / 2.0, win_height / 2.0)
+        }
+    };
+
+    let circle = document.create_element("div").unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
+    circle.class_list().add_1("xray-circle").unwrap();
+
+    let win_width = window.inner_width().unwrap().as_f64().unwrap_or(1000.0);
+    let win_height = window.inner_height().unwrap().as_f64().unwrap_or(1000.0);
+    let max_dim = win_width.max(win_height);
+    let circle_diameter = max_dim * 2.0;
+
+    let style = format!(
+        "position: fixed; top: {}px; left: {}px; width: {}px; height: {}px; transform: translate(-50%, -50%) scale(0); border-radius: 50%; z-index: 9999; pointer-events: none;",
+        button_y, button_x, circle_diameter, circle_diameter
+    );
+    circle.set_attribute("style", &style).unwrap();
+
+    body.append_child(&circle).unwrap();
+    let _ = circle.offset_width();
+    circle.class_list().add_1("expanding").unwrap();
+
+    let link = ctx.link().clone();
+    let circle_clone_phase2 = circle.clone();
+    let body_clone = body.clone();
+
+    body.class_list().add_1("xray-active").unwrap();
+
+    gloo_timers::callback::Timeout::new(500, move || {
+        link.send_message(Msg::InternalExecuteClearAll);
+        let circle_clone_phase3 = circle_clone_phase2.clone();
+        let body_clone2 = body_clone.clone();
+        circle_clone_phase3.class_list().remove_1("expanding").unwrap();
+        circle_clone_phase3.class_list().add_1("contracting").unwrap();
+        let _ = body_clone2.class_list().remove_1("xray-active");
+    }).forget();
+
+    let circle_clone_cleanup = circle.clone();
+    gloo_timers::callback::Timeout::new(2000, move || {
+        if let Some(parent) = circle_clone_cleanup.parent_node() {
+            let _ = parent.remove_child(&circle_clone_cleanup);
+        }
+    }).forget();
+
+    false
+}
+
+pub fn handle_internal_execute_clear_all(model: &mut Model) -> bool {
     for (_, file_data) in model.files.iter_mut() {
         let _ = file_data.preview_url.take();
     }
@@ -255,13 +332,13 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
             model.loading = true;
             model.error = None;
             model.future_requests = 1;
-            
+
             let files = vec![file_data.clone()];
             send_inference_request(ctx, files);
             return true;
         }
     }
-    
+
     ctx.link().send_message(Msg::SetError(Some("No file selected for analysis.".into())));
     false
 }
