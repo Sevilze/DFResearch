@@ -252,7 +252,7 @@ pub fn handle_clear_all_files(_model: &mut Model, ctx: &Context<Model>) -> bool 
         }
     };
     let body = match document.body() {
-        Some(b) => b,
+        Some(body) => body,
         None => {
             ctx.link().send_message(Msg::InternalExecuteClearAll);
             return false;
@@ -293,7 +293,6 @@ pub fn handle_clear_all_files(_model: &mut Model, ctx: &Context<Model>) -> bool 
     let link = ctx.link().clone();
     let circle_clone_phase2 = circle.clone();
     let body_clone = body.clone();
-
     body.class_list().add_1("xray-active").unwrap();
 
     gloo_timers::callback::Timeout::new(500, move || {
