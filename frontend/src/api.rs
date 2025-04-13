@@ -1,6 +1,9 @@
 use yew::prelude::*;
 use gloo_net::http::Request;
+use gloo_console::error;
 use gloo_timers::callback::Interval;
+use wasm_bindgen_futures::spawn_local;
+use serde_json::to_string_pretty;
 use shared::Task;
 
 #[derive(Properties, PartialEq)]
@@ -42,7 +45,7 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
                 }
             }
             Err(err) => {
-                gloo_console::error!(format!("Fetch error: {:?}", err));
+                error!(format!("Fetch error: {:?}", err));
                 Err(())
             }
         }
@@ -57,7 +60,7 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
                 let task = task.clone();
                 let polling = polling.clone();
                 let task_id = task_id.clone();
-                wasm_bindgen_futures::spawn_local(async move {
+                spawn_local(async move {
                     match fetch_task_status(&task_id, task.clone()).await {
                         Ok(continue_polling) => {
                             if !continue_polling {
@@ -80,12 +83,13 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
 
         use_effect_with_deps(
             move |task_id_opt| {
+                task.set(None);
                 polling_outer.set(None);
 
                 if let Some(task_id) = task_id_opt.clone() {
                     let task = task.clone();
                     let polling = polling_outer.clone();
-                    wasm_bindgen_futures::spawn_local(async move {
+                    spawn_local(async move {
                         match fetch_task_status(&task_id, task.clone()).await {
                             Ok(continue_polling) => {
                                 if continue_polling {
@@ -118,7 +122,7 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
                             <p><strong>{"Status:"}</strong> {task.status.clone().unwrap_or_default()}</p>
                             {
                                 if let Some(result) = &task.result {
-                                    html! { <pre>{serde_json::to_string_pretty(result).unwrap_or_default()}</pre> }
+                                    html! { <pre>{to_string_pretty(result).unwrap_or_default()}</pre> }
                                 } else if let Some(error) = &task.error {
                                     html! { <p style="color:red;">{error}</p> }
                                 } else {

@@ -27,7 +27,7 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                 <button
                     id="clear-all-btn"
                     class="analyze-btn"
-                    style="background-color: var(--danger-color);"
+                    style="background-color: var(--clear-color);"
                     onclick={debounce(300, {
                         let link = link.clone();
                         move || link.send_message(Msg::ClearAllFiles)

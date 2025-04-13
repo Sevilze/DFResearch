@@ -3,51 +3,11 @@ mod pyprocess;
 mod db;
 
 use actix_cors::Cors;
-use actix_files::Files;
-use actix_web::{web, App, HttpServer, post, HttpResponse, Responder};
+use actix_web::{web, App, HttpServer};
 use pyprocess::model::Model;
 use routes::configure_routes;
 use db::task_repository::TaskRepository;
-use actix_multipart::Multipart;
-use futures_util::StreamExt;
 use std::env;
-use shared::InferenceResponse;
-
-#[post("/api/inference")]
-async fn inference_handler(
-    mut payload: Multipart,
-    model: web::Data<Model>,
-) -> impl Responder {
-    let mut image_data = Vec::new();
-
-    while let Some(item) = payload.next().await {
-        let mut field = item.unwrap();
-        while let Some(chunk) = field.next().await {
-            image_data.extend_from_slice(&chunk.unwrap());
-        }
-    }
-
-    if image_data.is_empty() {
-        return HttpResponse::BadRequest().body("No image uploaded.");
-    }
-
-    match model.inference(&image_data) {
-        Ok(predictions) => {
-            let (is_ai, confidence) = model.calculate_result(&predictions);
-            let response = InferenceResponse {
-                predictions,
-                class_labels: vec!["AI Generated".into(), "Human Created".into()],
-                is_ai,
-                confidence,
-            };
-            HttpResponse::Ok().json(response)
-        },
-        Err(err) => {
-            log::error!("Inference error: {:?}", err);
-            HttpResponse::InternalServerError().body("Inference failed.")
-        }
-    }
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -61,9 +21,8 @@ async fn main() -> std::io::Result<()> {
     
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let frontend_dir = format!("{}/../frontend", manifest_dir);
-    let dist_dir = format!("{}/../frontend/dist", manifest_dir);
     let model_path = format!("{}/../pyproject/models/EarlyFusionEnsemble/best_model/EarlyFusionEnsemble_scripted.pt", manifest_dir); 
-    let model = Model::new(&model_path);
+    let model = Model::load_intermediate(&model_path);
 
     dotenv::dotenv().ok();
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -90,8 +49,6 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(model.clone()))
             .app_data(web::Data::new(task_repo.clone()))
             .configure(|cfg| configure_routes(cfg, frontend_dir.clone()))
-            .service(inference_handler)
-            .service(Files::new("/", dist_dir.clone()).index_file("index.html"))
     })
     .bind("0.0.0.0:8081")?
     .run()
