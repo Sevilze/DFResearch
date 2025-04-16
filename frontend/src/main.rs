@@ -1,6 +1,6 @@
 use gloo_events::EventListener;
 use gloo_file::{File as GlooFile, ObjectUrl};
-use shared::InferenceResponse;
+use shared::{InferenceResponse, ProcessingMode};
 use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 use web_sys::ClipboardEvent;
@@ -31,6 +31,7 @@ pub struct Model {
     pub preview_loading: bool,
     pub preview_load_timeout: Option<Timeout>,
     pub task_map: HashMap<u64, String>,
+    pub processing_mode: ProcessingMode,
 }
 
 #[derive(Clone)]
@@ -57,6 +58,7 @@ pub enum Msg {
     SetTaskMap(HashMap<u64, String>),
     HandleDrop(DragEvent),
     HandlePaste(ClipboardEvent),
+    SetProcessingMode(ProcessingMode),
 }
 
 impl Component for Model {
@@ -77,6 +79,7 @@ impl Component for Model {
             preview_loading: false,
             preview_load_timeout: None,
             task_map: HashMap::new(),
+            processing_mode: ProcessingMode::IntermediateFusionEnsemble, // Initialize with default
         };
 
         let link = ctx.link().clone();
@@ -119,6 +122,10 @@ impl Component for Model {
             Msg::HandleDrop(event) => handle_drop(self, ctx, event),
             Msg::HandlePaste(event) => handle_paste(self, ctx, event),
             Msg::InternalExecuteClearAll => handle_internal_execute_clear_all(self),
+            Msg::SetProcessingMode(mode) => {
+                self.processing_mode = mode;
+                true
+            }
         }
     }
 

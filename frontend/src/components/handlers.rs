@@ -1,6 +1,6 @@
 use yew::prelude::*;
 use gloo_file::{File as GlooFile, ObjectUrl};
-use shared::InferenceResponse;
+use shared::{InferenceResponse, ProcessingMode};
 use gloo_timers::callback::Timeout;
 use web_sys::{DragEvent, ClipboardEvent, FileList};
 use gloo_net::http::Request;
@@ -76,11 +76,17 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     }
 }
 
-pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>) {
+pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>, mode: ProcessingMode) {
     let link = ctx.link().clone();
 
     wasm_bindgen_futures::spawn_local(async move {
         let form_data = web_sys::FormData::new().unwrap();
+
+        let mode_str = match mode {
+            ProcessingMode::IntermediateFusionEnsemble => "intermediate_fusion",
+            ProcessingMode::LateFusionEnsemble => "late_fusion",
+        };
+        form_data.append_with_str("mode", mode_str).unwrap();
 
         for file_data in &files {
             form_data.append_with_blob("image", file_data.file.as_ref()).unwrap();
@@ -333,7 +339,8 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
             model.future_requests = 1;
 
             let files = vec![file_data.clone()];
-            send_inference_request(ctx, files);
+            // Pass the current mode from model state
+            send_inference_request(ctx, files, model.processing_mode.clone());
             return true;
         }
     }
@@ -348,7 +355,8 @@ pub fn handle_analyze_all(model: &mut Model, ctx: &Context<Model>) -> bool {
     model.future_requests = model.files.len();
 
     let files: Vec<_> = model.files.values().cloned().collect();
-    send_inference_request(ctx, files);
+    // Pass the current mode from model state
+    send_inference_request(ctx, files, model.processing_mode.clone());
 
     true
 }

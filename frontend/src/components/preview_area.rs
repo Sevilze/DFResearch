@@ -1,6 +1,6 @@
 use yew::prelude::*;
-use super::super::{Model, FileData};
-use super::super::Msg;
+use super::super::{Model, FileData, Msg};
+use shared::ProcessingMode; // Import ProcessingMode
 use super::utils::debounce;
 
 pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
@@ -23,6 +23,22 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                         .collect::<Html>()
                 }}
             </div>
+            <div class="processing-mode-selector">
+                <label>
+                    <input type="radio" name="processing_mode"
+                           value="intermediate"
+                            checked={model.processing_mode == ProcessingMode::IntermediateFusionEnsemble}
+                            onchange={ctx.link().callback(|_| Msg::SetProcessingMode(ProcessingMode::IntermediateFusionEnsemble))} />
+                     <span class="radio-label-text">{ "Intermediate Fusion" }</span>
+                 </label>
+                 <label>
+                    <input type="radio" name="processing_mode"
+                           value="late"
+                            checked={model.processing_mode == ProcessingMode::LateFusionEnsemble}
+                            onchange={ctx.link().callback(|_| Msg::SetProcessingMode(ProcessingMode::LateFusionEnsemble))} />
+                     <span class="radio-label-text">{ "Late Fusion" }</span>
+                 </label>
+             </div>
             <div class="button-container">
                 <button
                     id="clear-all-btn"

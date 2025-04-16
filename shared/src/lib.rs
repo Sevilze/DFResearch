@@ -3,6 +3,12 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ProcessingMode {
+    IntermediateFusionEnsemble,
+    LateFusionEnsemble,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Task {
     pub id: Uuid,
