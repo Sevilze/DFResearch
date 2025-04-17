@@ -13,7 +13,7 @@ class RegnetTrainer(BaseTrainer):
             betas=(0.9, 0.999),
             eps=1e-8,
         )
-
+        
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
             self.optimizer,
             max_lr=max_lr,
@@ -42,8 +42,8 @@ class RegnetTrainer(BaseTrainer):
         for inputs, labels in pbar:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
 
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                loss, outputs = self.common_train_step(inputs, labels)
+            # Note: common_train_step already uses autocast, so we don't need to wrap it here
+            loss, outputs = self.common_train_step(inputs, labels)
 
             if self.scheduler:
                 self.scheduler.step()

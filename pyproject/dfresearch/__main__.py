@@ -106,7 +106,6 @@ def main():
         )
 
     trainer.train(trainer.epochs)
-    trainer.plot_training_curves()
 
 
 if __name__ == "__main__":

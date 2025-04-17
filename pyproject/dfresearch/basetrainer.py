@@ -1,10 +1,15 @@
 import os
 import shutil
 import torch
+import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
+import pandas as pd
 from torch import nn
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+from sklearn.metrics import roc_curve, auc, confusion_matrix, precision_recall_curve, average_precision_score, classification_report
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 class BaseTrainer:
@@ -76,11 +81,15 @@ class BaseTrainer:
         correct += predicted.eq(labels).sum().item()
         return total_loss, correct, total
 
-    def evaluate(self):
+    def evaluate(self, collect_predictions=False):
         self.model.eval()
         total_loss = 0
         correct = 0
         total = 0
+
+        all_labels = []
+        all_predictions = []
+        all_probabilities = []
 
         pbar = self.init_tqdm(self.test_loader, "Evaluating")
         for inputs, labels in pbar:
@@ -91,6 +100,14 @@ class BaseTrainer:
                 loss, outputs, labels, total_loss, correct, total
             )
 
+            if collect_predictions:
+                probs = torch.nn.functional.softmax(outputs, dim=1)
+                _, preds = torch.max(outputs, 1)
+
+                all_labels.extend(labels.cpu().numpy())
+                all_predictions.extend(preds.cpu().numpy())
+                all_probabilities.extend(probs.cpu().detach().numpy())
+
             pbar.set_postfix(
                 {
                     "loss": f"{total_loss / total:.4f}",
@@ -99,7 +116,14 @@ class BaseTrainer:
                 }
             )
 
-        return total_loss / len(self.test_loader), correct / total
+        if collect_predictions:
+            return total_loss / len(self.test_loader), correct / total, {
+                "labels": np.array(all_labels),
+                "predictions": np.array(all_predictions),
+                "probabilities": np.array(all_probabilities)
+            }
+        else:
+            return total_loss / len(self.test_loader), correct / total
 
     def train(self, epochs):
         best_acc = self.read_best_eval()
@@ -107,7 +131,8 @@ class BaseTrainer:
         epoch_pbar = tqdm(range(epochs), desc=f"Training {self.model_name}")
         for epoch in epoch_pbar:
             train_loss, train_acc = self.train_epoch()
-            val_loss, val_acc = self.evaluate()
+            val_loss, val_acc, metrics_data = self.evaluate(collect_predictions=True)
+            self.metrics_data = metrics_data
 
             self.update_history(train_loss, train_acc, val_loss, val_acc)
             self.update_progress_bar(
@@ -119,7 +144,6 @@ class BaseTrainer:
             if val_acc > best_acc:
                 best_acc = val_acc
                 self.update_best_eval(best_acc)
-                self.save_model(epoch, best_acc)
                 self.save_scripted_model(epoch, best_acc)
                 self.copy_tfoutput()
 
@@ -151,22 +175,6 @@ class BaseTrainer:
         )
         self.writer.flush()
 
-    def save_model(self, epoch, best_acc):
-        save_path = os.path.join(self.best_model_dir, f"{self.model_name}_best.pth")
-        torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "scheduler_state_dict": self.scheduler.state_dict(),
-                "best_acc": best_acc,
-            },
-            save_path,
-        )
-        tqdm.write(
-            f"New best {self.model_name} accuracy: {best_acc:.2%} (saved to {save_path})"
-        )
-
     def save_scripted_model(self, epoch, best_acc):
         self.model.eval()
         try:
@@ -176,7 +184,7 @@ class BaseTrainer:
             return
         scripted_model_path = os.path.join(self.best_model_dir, f"{self.model_name}_scripted.pt")
         scripted_model.save(scripted_model_path)
-        tqdm.write(f"Scripted model saved to {scripted_model_path}")
+        tqdm.write(f"Saved best model with accuracy {best_acc:.4f} to {scripted_model_path}")
 
     def read_best_eval(self):
         if os.path.exists(self.best_eval_file):
@@ -204,27 +212,231 @@ class BaseTrainer:
     def plot_training_curves(self, epoch):
         if epoch == 0:
             return
+
+        plt.style.use('dark_background')
+        sns.set_theme(style="darkgrid", palette="deep")
+        colors = sns.color_palette("bright", n_colors=6)
         
         epochs_range = range(1, len(self.history["train_loss"]) + 1)
+        fig = plt.figure(figsize=(20, 15), facecolor='#121212')
+        gs = gridspec.GridSpec(3, 3, figure=fig)
+
+        text_color = 'white'
+        grid_color = '#333333'
         
-        plt.figure(figsize=(12, 5))
-        plt.subplot(1, 2, 1)
-        plt.plot(epochs_range, self.history["train_loss"], label="Train Loss")
-        plt.plot(epochs_range, self.history["val_loss"], label="Val Loss")
-        plt.title(f"{self.model_name} Loss")
-        plt.xlabel("Epoch")
-        plt.legend()
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.plot(epochs_range, self.history["train_loss"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[0], label="Train Loss") # Increased marker size
+        ax1.plot(epochs_range, self.history["val_loss"], marker='o', markersize=6, linestyle='--', linewidth=2.0, color=colors[1], label="Val Loss") # Increased marker size
+        ax1.set_title(f"{self.model_name} Loss", fontsize=14, fontweight='bold', color=text_color)
+        ax1.set_xlabel("Epoch", fontsize=12, color=text_color)
+        ax1.set_ylabel("Loss", fontsize=12, color=text_color)
+        ax1.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+        ax1.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+        ax1.grid(color=grid_color, linestyle='--', linewidth=0.5)
+        ax1.set_facecolor('#1E1E1E')
 
-        plt.subplot(1, 2, 2)
-        plt.plot(epochs_range, self.history["train_acc"], label="Train Accuracy")
-        plt.plot(epochs_range, self.history["val_acc"], label="Val Accuracy")
-        plt.title(f"{self.model_name} Accuracy")
-        plt.xlabel("Epoch")
-        plt.legend()
+        ax2 = fig.add_subplot(gs[0, 1])
+        ax2.plot(epochs_range, self.history["train_acc"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[2], label="Train Accuracy") # Increased marker size
+        ax2.plot(epochs_range, self.history["val_acc"], marker='o', markersize=6, linestyle='--', linewidth=2.0, color=colors[3], label="Val Accuracy") # Increased marker size
+        ax2.set_title(f"{self.model_name} Accuracy", fontsize=14, fontweight='bold', color=text_color)
+        ax2.set_xlabel("Epoch", fontsize=12, color=text_color)
+        ax2.set_ylabel("Accuracy", fontsize=12, color=text_color)
+        ax2.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+        ax2.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+        ax2.grid(color=grid_color, linestyle='--', linewidth=0.5)
+        ax2.set_facecolor('#1E1E1E')
 
-        plt.tight_layout()
+        ax3 = fig.add_subplot(gs[0, 2])
+        ax3.plot(epochs_range, self.history["lr"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[4]) # Increased marker size
+        ax3.set_title(f"{self.model_name} Learning Rate", fontsize=14, fontweight='bold', color=text_color)
+        ax3.set_xlabel("Epoch", fontsize=12, color=text_color)
+        ax3.set_ylabel("Learning Rate", fontsize=12, color=text_color)
+        ax3.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+        ax3.grid(color=grid_color, linestyle='--', linewidth=0.5)
+        ax3.set_facecolor('#1E1E1E')
+
+        if hasattr(self, 'metrics_data') and self.metrics_data is not None:
+            ax4 = fig.add_subplot(gs[1, 0])
+            cm = confusion_matrix(self.metrics_data['labels'], self.metrics_data['predictions'])
+            
+            cmap = sns.color_palette("RdPu", as_cmap=True)
+            sns.heatmap(cm, annot=True, fmt='d', cmap=cmap, ax=ax4, cbar=True, 
+                        annot_kws={"size": 11, "color": "black"},
+                        cbar_kws={'label': 'Count', 'shrink': 0.75}) 
+                        
+            # Set colorbar label color explicitly
+            cbar = ax4.collections[0].colorbar
+            cbar.ax.yaxis.label.set_color(text_color)
+            cbar.ax.tick_params(axis='y', colors=text_color)
+
+            ax4.set_title(f"{self.model_name} Confusion Matrix", fontsize=14, fontweight='bold', color=text_color)
+            ax4.set_xlabel('Predicted Label', fontsize=12, color=text_color)
+            ax4.set_ylabel('True Label', fontsize=12, color=text_color)
+            ax4.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+            ax4.set_facecolor('#1E1E1E')
+
+            ax5 = fig.add_subplot(gs[1, 1])
+            n_classes = self.metrics_data['probabilities'].shape[1]
+
+            fpr = dict()
+            tpr = dict()
+            roc_auc = dict()
+
+            for i in range(n_classes):
+                fpr[i], tpr[i], _ = roc_curve(
+                    (self.metrics_data['labels'] == i).astype(int),
+                    self.metrics_data['probabilities'][:, i]
+                )
+                roc_auc[i] = auc(fpr[i], tpr[i])
+
+            bright_colors = plt.cm.rainbow(np.linspace(0, 1, n_classes))
+            
+            for i, color in zip(range(n_classes), bright_colors):
+                if i in fpr:
+                    ax5.plot(
+                        fpr[i], tpr[i], color=color, lw=2.5,
+                        label=f'Class {i} (AUC = {roc_auc[i]:.3f})' # Label added here
+                    )
+                    # REMOVED ax5.text(...) to avoid duplicate legend entries
+
+            ax5.plot([0, 1], [0, 1], 'w--', lw=1.5, alpha=0.8)
+            ax5.set_xlim([0.0, 1.0])
+            ax5.set_ylim([0.0, 1.05])
+            ax5.set_xlabel('False Positive Rate', fontsize=12, color=text_color)
+            ax5.set_ylabel('True Positive Rate', fontsize=12, color=text_color)
+            ax5.set_title(f"{self.model_name} ROC Curve with AUC Scores", fontsize=14, fontweight='bold', color=text_color)
+            ax5.legend(loc="lower right", fontsize=9, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color) # Standard legend used
+            ax5.tick_params(axis='x', colors=text_color) # Ensure x-axis ticks are visible
+            ax5.tick_params(axis='y', colors=text_color) # Ensure y-axis ticks are visible
+            ax5.grid(color=grid_color, linestyle='--', linewidth=0.5)
+            ax5.set_facecolor('#1E1E1E')
+
+            ax6 = fig.add_subplot(gs[1, 2])
+            precision = dict()
+            recall = dict()
+            avg_precision = dict()
+
+            for i in range(n_classes):
+                precision[i], recall[i], _ = precision_recall_curve(
+                    (self.metrics_data['labels'] == i).astype(int),
+                    self.metrics_data['probabilities'][:, i]
+                )
+                avg_precision[i] = average_precision_score(
+                    (self.metrics_data['labels'] == i).astype(int),
+                    self.metrics_data['probabilities'][:, i]
+                )
+
+            for i, color in zip(range(n_classes), bright_colors):
+                if i in precision:
+                    ax6.plot(
+                        recall[i], precision[i], color=color, lw=2.5,
+                        label=f'Class {i} (AP = {avg_precision[i]:.3f})'
+                    )
+
+            ax6.set_xlim([0.0, 1.0])
+            ax6.set_ylim([0.0, 1.05])
+            ax6.set_xlabel('Recall', fontsize=12, color=text_color)
+            ax6.set_ylabel('Precision', fontsize=12, color=text_color)
+            ax6.set_title(f"{self.model_name} Precision-Recall Curve", fontsize=14, fontweight='bold', color=text_color)
+            ax6.legend(loc="lower left", fontsize=9, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax6.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+            ax6.grid(color=grid_color, linestyle='--', linewidth=0.5)
+            ax6.set_facecolor('#1E1E1E')
+
+            ax7 = fig.add_subplot(gs[2, 0])
+            try:
+                report = classification_report(
+                    self.metrics_data['labels'],
+                    self.metrics_data['predictions'],
+                    output_dict=True,
+                    zero_division=0
+                )
+                
+                class_indices = [str(i) for i in range(n_classes)]
+                metrics = ['precision', 'recall', 'f1-score']
+                
+                data = []
+                for cls in class_indices:
+                    for metric in metrics:
+                        data.append({
+                            'class': f'Class {cls}',
+                            'metric': metric,
+                            'value': report[cls][metric]
+                        })
+                
+                df = pd.DataFrame(data)
+                pivot_df = df.pivot(index='class', columns='metric', values='value')
+                pivot_df.plot(kind='bar', ax=ax7, color=bright_colors[:3], width=0.8, alpha=0.9, edgecolor='white', linewidth=0.5)
+                
+                for container in ax7.containers:
+                    ax7.bar_label(container, fmt='%.2f', padding=3, color=text_color, fontweight='bold', fontsize=9)
+                
+                ax7.set_title(f"{self.model_name} Class Performance Metrics", fontsize=14, fontweight='bold', color=text_color)
+                ax7.set_xlabel('Class', fontsize=12, color=text_color)
+                ax7.set_ylabel('Score', fontsize=12, color=text_color)
+                ax7.legend(title='Metrics', fontsize=10, title_fontsize=11, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+                ax7.tick_params(axis='x', rotation=0, labelsize=10, colors=text_color)
+                ax7.tick_params(axis='y', labelsize=10, colors=text_color)
+                ax7.set_ylim([0, 1.05])  # Standardize y-axis for metrics
+                ax7.grid(color=grid_color, linestyle='--', linewidth=0.5, axis='y')
+                ax7.set_facecolor('#1E1E1E')
+                
+            except Exception as e:
+                ax7.text(0.5, 0.5, f"Could not generate report:\n{e}", ha='center', va='center', fontsize=11, color=text_color)
+                ax7.set_title(f"{self.model_name} Class Metrics", fontsize=14, fontweight='bold', color=text_color)
+                ax7.set_facecolor('#1E1E1E')
+
+            ax8 = fig.add_subplot(gs[2, 1])
+            pred_counts = np.bincount(self.metrics_data['predictions'], minlength=n_classes)
+            true_counts = np.bincount(self.metrics_data['labels'], minlength=n_classes)
+            
+            labels = [f'Class {i}' for i in range(n_classes)]
+            x = np.arange(len(labels))
+            width = 0.35
+            
+            rects1 = ax8.bar(x - width/2, true_counts, width, label='True', color=bright_colors[0], alpha=0.9, edgecolor='white', linewidth=0.5)
+            rects2 = ax8.bar(x + width/2, pred_counts, width, label='Predicted', color=bright_colors[1], alpha=0.9, edgecolor='white', linewidth=0.5)
+            
+            ax8.set_title(f"{self.model_name} Class Distribution", fontsize=14, fontweight='bold', color=text_color)
+            ax8.set_xlabel('Class', fontsize=12, color=text_color)
+            ax8.set_ylabel('Count', fontsize=12, color=text_color)
+            ax8.set_xticks(x)
+            ax8.set_xticklabels(labels)
+            ax8.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax8.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+            
+            ax8.bar_label(rects1, padding=3, color=text_color, fontsize=9)
+            ax8.bar_label(rects2, padding=3, color=text_color, fontsize=9)
+            
+            ax8.grid(color=grid_color, linestyle='--', linewidth=0.5, axis='y')
+            ax8.set_facecolor('#1E1E1E')
+
+            ax9 = fig.add_subplot(gs[2, 2])
+            for i, color in zip(range(n_classes), bright_colors):
+                sns.kdeplot(
+                    self.metrics_data['probabilities'][:, i], 
+                    label=f'Class {i}', 
+                    ax=ax9, 
+                    color=color, 
+                    fill=True, 
+                    alpha=0.4,
+                    linewidth=2.5
+                )
+                
+            ax9.set_title(f"{self.model_name} Probability Density", fontsize=14, fontweight='bold', color=text_color)
+            ax9.set_xlabel('Probability', fontsize=12, color=text_color)
+            ax9.set_ylabel('Density', fontsize=12, color=text_color)
+            ax9.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax9.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
+            ax9.grid(color=grid_color, linestyle='--', linewidth=0.5)
+            ax9.set_facecolor('#1E1E1E')
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        fig.suptitle(f"{self.model_name} Training Metrics - Epoch {epoch}", 
+                    fontsize=16, fontweight='bold', color=text_color, y=0.99)
+
         plot_path = os.path.join(self.model_dir, f"{self.model_name}_current_run.png")
-        plt.savefig(plot_path)
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
         plt.close()
 
         if os.path.exists(self.best_eval_file):
@@ -233,4 +445,4 @@ class BaseTrainer:
             if current_val_acc >= best_acc:
                 best_plot_path = os.path.join(self.best_model_dir, f"{self.model_name}_best_plot.png")
                 shutil.copy(plot_path, best_plot_path)
-                tqdm.write(f"Copied plot to {best_plot_path}")
+                tqdm.write(f"New best model plot saved to {best_plot_path}")
