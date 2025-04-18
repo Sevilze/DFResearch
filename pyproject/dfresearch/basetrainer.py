@@ -264,7 +264,6 @@ class BaseTrainer:
                         annot_kws={"size": 11, "color": "black"},
                         cbar_kws={'label': 'Count', 'shrink': 0.75}) 
                         
-            # Set colorbar label color explicitly
             cbar = ax4.collections[0].colorbar
             cbar.ax.yaxis.label.set_color(text_color)
             cbar.ax.tick_params(axis='y', colors=text_color)
@@ -295,19 +294,18 @@ class BaseTrainer:
                 if i in fpr:
                     ax5.plot(
                         fpr[i], tpr[i], color=color, lw=2.5,
-                        label=f'Class {i} (AUC = {roc_auc[i]:.3f})' # Label added here
+                        label=f'Class {i} (AUC = {roc_auc[i]:.3f})'
                     )
-                    # REMOVED ax5.text(...) to avoid duplicate legend entries
 
             ax5.plot([0, 1], [0, 1], 'w--', lw=1.5, alpha=0.8)
-            ax5.set_xlim([0.0, 1.0])
+            ax5.set_xlim([-0.1, 1.05])
             ax5.set_ylim([0.0, 1.05])
             ax5.set_xlabel('False Positive Rate', fontsize=12, color=text_color)
             ax5.set_ylabel('True Positive Rate', fontsize=12, color=text_color)
             ax5.set_title(f"{self.model_name} ROC Curve with AUC Scores", fontsize=14, fontweight='bold', color=text_color)
-            ax5.legend(loc="lower right", fontsize=9, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color) # Standard legend used
-            ax5.tick_params(axis='x', colors=text_color) # Ensure x-axis ticks are visible
-            ax5.tick_params(axis='y', colors=text_color) # Ensure y-axis ticks are visible
+            ax5.legend(loc="lower right", fontsize=9, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax5.tick_params(axis='x', colors=text_color)
+            ax5.tick_params(axis='y', colors=text_color)
             ax5.grid(color=grid_color, linestyle='--', linewidth=0.5)
             ax5.set_facecolor('#1E1E1E')
 
@@ -333,7 +331,7 @@ class BaseTrainer:
                         label=f'Class {i} (AP = {avg_precision[i]:.3f})'
                     )
 
-            ax6.set_xlim([0.0, 1.0])
+            ax6.set_xlim([-0.1, 1.05])
             ax6.set_ylim([0.0, 1.05])
             ax6.set_xlabel('Recall', fontsize=12, color=text_color)
             ax6.set_ylabel('Precision', fontsize=12, color=text_color)
@@ -432,7 +430,7 @@ class BaseTrainer:
             ax9.set_facecolor('#1E1E1E')
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-        fig.suptitle(f"{self.model_name} Training Metrics - Epoch {epoch}", 
+        fig.suptitle(f"{self.model_name} Training Metrics - Epoch {epoch + 1}", 
                     fontsize=16, fontweight='bold', color=text_color, y=0.99)
 
         plot_path = os.path.join(self.model_dir, f"{self.model_name}_current_run.png")

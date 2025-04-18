@@ -38,7 +38,6 @@ class DensenetTrainer(BaseTrainer):
         pbar = self.init_tqdm(self.train_loader, "Training")
         for inputs, labels in pbar:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
-
             loss, outputs = self.common_train_step(inputs, labels)
 
             if self.scheduler:

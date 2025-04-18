@@ -41,8 +41,6 @@ class RegnetTrainer(BaseTrainer):
         pbar = self.init_tqdm(self.train_loader, "Training")
         for inputs, labels in pbar:
             inputs, labels = inputs.to(self.device), labels.to(self.device)
-
-            # Note: common_train_step already uses autocast, so we don't need to wrap it here
             loss, outputs = self.common_train_step(inputs, labels)
 
             if self.scheduler:

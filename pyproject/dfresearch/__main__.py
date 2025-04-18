@@ -9,7 +9,7 @@ from ..densenet.densenetmodel import DensenetClassifier
 from ..densenet.trainer import DensenetTrainer
 from ..regnet.regnetmodel import RegnetClassifier
 from ..regnet.trainer import RegnetTrainer
-from .ensemblemodel import EarlyFusionEnsemble
+from .ensemblemodel import IntermediateFusionEnsemble
 from .ensembletrainer import EnsembleTrainer
 
 
@@ -86,15 +86,12 @@ def main():
         )
     elif args.model == "ensemble":
 
-        model = EarlyFusionEnsemble(
+        model = IntermediateFusionEnsemble(
             num_classes=2,
             in_channels=data_wrapper.input_channels,
-            resnet_model=resnet_model,
-            densenet_model=densenet_model,
-            regnet_model=regnet_model,
-            resnet_path="pyproject/models/ResnetClassifier/best_model/ResnetClassifier_best.pth",
-            densenet_path="pyproject/models/DensenetClassifier/best_model/DensenetClassifier_best.pth",
-            regnet_path="pyproject/models/RegnetClassifier/best_model/RegnetClassifier_best.pth",
+            resnet_path="pyproject/models/ResnetClassifier/best_model/ResnetClassifier_scripted.pt",
+            densenet_path="pyproject/models/DensenetClassifier/best_model/DensenetClassifier_scripted.pt",
+            regnet_path="pyproject/models/RegnetClassifier/best_model/RegnetClassifier_scripted.pt",
             freeze=True
         )
         trainer = EnsembleTrainer(
