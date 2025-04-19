@@ -339,7 +339,6 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
             model.future_requests = 1;
 
             let files = vec![file_data.clone()];
-            // Pass the current mode from model state
             send_inference_request(ctx, files, model.processing_mode.clone());
             return true;
         }
@@ -355,8 +354,12 @@ pub fn handle_analyze_all(model: &mut Model, ctx: &Context<Model>) -> bool {
     model.future_requests = model.files.len();
 
     let files: Vec<_> = model.files.values().cloned().collect();
-    // Pass the current mode from model state
     send_inference_request(ctx, files, model.processing_mode.clone());
 
+    true
+}
+
+pub fn handle_set_processing_mode(model: &mut Model, _ctx: &Context<Model>, mode: ProcessingMode) -> bool {
+    model.processing_mode = mode.clone();
     true
 }

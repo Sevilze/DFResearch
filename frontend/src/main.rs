@@ -79,7 +79,7 @@ impl Component for Model {
             preview_loading: false,
             preview_load_timeout: None,
             task_map: HashMap::new(),
-            processing_mode: ProcessingMode::IntermediateFusionEnsemble, // Initialize with default
+            processing_mode: ProcessingMode::IntermediateFusionEnsemble,
         };
 
         let link = ctx.link().clone();
@@ -122,10 +122,7 @@ impl Component for Model {
             Msg::HandleDrop(event) => handle_drop(self, ctx, event),
             Msg::HandlePaste(event) => handle_paste(self, ctx, event),
             Msg::InternalExecuteClearAll => handle_internal_execute_clear_all(self),
-            Msg::SetProcessingMode(mode) => {
-                self.processing_mode = mode;
-                true
-            }
+            Msg::SetProcessingMode(mode) => handle_set_processing_mode(self, ctx, mode)
         }
     }
 

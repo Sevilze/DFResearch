@@ -8,6 +8,7 @@ use pyprocess::model::Model;
 use routes::configure_routes;
 use db::task_repository::TaskRepository;
 use std::env;
+use std::sync::{Arc, Mutex};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -18,11 +19,10 @@ async fn main() -> std::io::Result<()> {
     } else {
         log::error!("Failed to get the current working directory.");
     }
-    
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let frontend_dir = format!("{}/../frontend", manifest_dir);
-    let model_path = format!("{}/../pyproject/models/EarlyFusionEnsemble/best_model/EarlyFusionEnsemble_scripted.pt", manifest_dir); 
-    let model = Model::load_intermediate(&model_path);
+    let model = Arc::new(Mutex::new(Model::new()));
 
     dotenv::dotenv().ok();
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");

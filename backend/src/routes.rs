@@ -5,8 +5,9 @@ use serde_json::json;
 use serde::Serialize;
 use uuid::Uuid;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use log::{info, error};
-use shared::InferenceResponse;
+use shared::{InferenceResponse, ProcessingMode};
 use futures::{StreamExt, TryStreamExt};
 use crate::pyprocess::model::Model;
 use crate::db::task_repository::TaskRepository;
@@ -25,32 +26,75 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, frontend_dir: String) {
 }
 
 async fn handle_inference(
-    model: web::Data<Model>,
+    model: web::Data<Arc<Mutex<Model>>>,
     mut payload: Multipart,
     task_repo: web::Data<TaskRepository>
 ) -> Result<HttpResponse, Error> {
     let mut results = Vec::new();
     let mut images: Vec<Vec<u8>> = Vec::new();
     let mut task_ids = Vec::new();
+    let mut processing_mode = ProcessingMode::IntermediateFusionEnsemble;
 
     while let Ok(Some(mut field)) = payload.try_next().await {
-        let mut image_data = Vec::new();
-        while let Some(chunk) = field.next().await {
-            let data = chunk?;
-            image_data.write_all(&data)?;
+        let content_disposition = field.content_disposition();
+        let field_name = content_disposition.get_name().unwrap_or("");
+
+        match field_name {
+            "image" => {
+                let mut image_data = Vec::new();
+                while let Some(chunk) = field.next().await {
+                    image_data.write_all(&chunk?)?;
+                }
+                if !image_data.is_empty() {
+                    images.push(image_data);
+                }
+            }
+            "mode" => {
+                let mut mode_data = Vec::new();
+                while let Some(chunk) = field.next().await {
+                    mode_data.write_all(&chunk?)?;
+                }
+                if let Ok(mode_str) = String::from_utf8(mode_data) {
+                    processing_mode = match mode_str.as_str() {
+                        "late_fusion" => ProcessingMode::LateFusionEnsemble,
+                        _ => ProcessingMode::IntermediateFusionEnsemble,
+                    };
+                } else {
+                    error!("Failed to parse processing mode string");
+                }
+            }
+            _ => {
+                info!("Ignoring unknown multipart field: {}", field_name);
+            }
         }
-        if !image_data.is_empty() {
-            images.push(image_data);
-        }
+    }
+
+    if images.is_empty() {
+        error!("No image data received in inference request");
+        return Ok(HttpResponse::BadRequest().json(ErrorResponse {
+            error: "No image data received.".to_string(),
+        }));
+    }
+
+    let mut model_guard = model.lock().map_err(|e| {
+        error!("Failed to lock model: {:?}", e);
+        actix_web::error::ErrorInternalServerError("Failed to lock model")
+    })?;
+
+    if let Err(e) = model_guard.persistent_load(&processing_mode) {
+        error!("Failed to load models for mode {:?}: {:?}", processing_mode, e);
+        return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to load models for mode {:?}", processing_mode),
+        }));
     }
 
     for image_data in &images {
         let task_id = Uuid::new_v4();
         task_ids.push(task_id);
 
-        match model.inference(image_data) {
+        match model_guard.inference(image_data, &processing_mode) {
             Ok(predictions) => {
-                let (is_ai, confidence) = model.calculate_result(&predictions);
+                let (is_ai, confidence) = model_guard.calculate_result(&predictions);
                 let response = InferenceResponse {
                     predictions: predictions.clone(),
                     class_labels: vec!["AI Generated".into(), "Human Created".into()],
@@ -143,3 +187,5 @@ async fn get_task(task_repo: web::Data<TaskRepository>, path: web::Path<String>)
         }
     }
 }
+
+
