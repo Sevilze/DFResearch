@@ -14,6 +14,7 @@ from PIL import Image
 import io
 from .setup import get_dataset_path
 from .loaderconf import BATCH_SIZE, RECOMPUTE_NORM
+from .config import AugmentationConfig
 
 
 class ChannelAugmentation:
@@ -163,15 +164,13 @@ class DataLoaderWrapper:
         self.batch_size = batch_size
         self.recompute_stats = recompute_norm
 
-        self.norm_mean = []
-        self.norm_std = []
+        config = AugmentationConfig.load()
+        self.augmenter = config.to_channel_augmentation()
 
-        self.base_transform = transforms.Compose(
-            [
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-            ]
-        )
+        self.base_transform = transforms.Compose([
+            transforms.Resize(config.image.size[0]),
+            transforms.CenterCrop(config.image.size[0]) if config.image.preprocessing.center_crop else lambda x: x,
+        ])
 
         self.stats_cache_file = os.path.join(self.dataset_path, "norm_stats.npz")
 
@@ -180,7 +179,7 @@ class DataLoaderWrapper:
                 self.base_transform,
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(30),
-                ChannelAugmentation(),
+                self.augmenter,
             ]
         )
 
@@ -226,7 +225,7 @@ class DataLoaderWrapper:
                 self.base_transform,
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(30),
-                ChannelAugmentation(),
+                self.augmenter,
                 # transforms.Normalize(mean=self.norm_mean, std=self.norm_std),
             ]
         )
@@ -234,7 +233,7 @@ class DataLoaderWrapper:
         self.test_transform = transforms.Compose(
             [
                 self.base_transform,
-                ChannelAugmentation(),
+                self.augmenter,
                 # transforms.Normalize(mean=self.norm_mean, std=self.norm_std),
             ]
         )

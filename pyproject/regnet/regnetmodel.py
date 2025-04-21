@@ -34,20 +34,6 @@ class SpatialAttention(nn.Module):
         return x * attention
 
 
-class ELA(nn.Module):
-    def __init__(self, channels, compression_quality=90):
-        super().__init__()
-        self.channels = channels
-        self.quality = compression_quality
-        self.process = nn.Conv2d(channels, channels, kernel_size=1)
-
-    def forward(self, x):
-        blur = nn.functional.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
-        quantized = torch.round(blur * self.quality) / self.quality
-        ela = torch.abs(x - quantized)
-        return x + self.process(ela)
-
-
 class FrequencyAnalysis(nn.Module):
     def __init__(self, channels):
         super().__init__()
@@ -63,27 +49,6 @@ class FrequencyAnalysis(nn.Module):
             fft_real, size=(h, w), mode="bilinear", align_corners=False
         )
         return self.conv_after_fft(fft_info)
-
-
-class NoiseAnalysis(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.high_pass = nn.Conv2d(
-            channels, channels, kernel_size=3, padding=1, bias=False
-        )
-        with torch.no_grad():
-            nn.init.constant_(self.high_pass.weight, 0)
-            self.high_pass.weight[:, :, 1, 1] = 1
-            self.high_pass.weight[:, :, 0, 1] = -0.25
-            self.high_pass.weight[:, :, 2, 1] = -0.25
-            self.high_pass.weight[:, :, 1, 0] = -0.25
-            self.high_pass.weight[:, :, 1, 2] = -0.25
-        self.noise_processor = nn.Conv2d(channels, channels, kernel_size=1)
-
-    def forward(self, x):
-        noise = self.high_pass(x)
-        processed_noise = self.noise_processor(torch.abs(noise))
-        return x + processed_noise
 
 
 class CrossResolution(nn.Module):

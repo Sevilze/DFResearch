@@ -5,6 +5,7 @@ use rustdct::DctPlanner;
 use ndarray::{ Array2, s };
 use std::f32::consts::PI;
 use super::model::InferenceError;
+use super::config::AugmentationConfig;
 
 pub struct ChannelAugmentation {
     pub add_dwt: bool,
@@ -571,7 +572,10 @@ fn ltp_pattern(gray: &Array2<f32>, threshold: f32) -> Array2<f32> {
 }
 
 pub fn preprocess(image_bytes: &[u8]) -> Result<Tensor, InferenceError> {
-    let augmenter = ChannelAugmentation::default();
+    let config = AugmentationConfig::load()
+        .map_err(|e| InferenceError::PreprocessingError(format!("Failed to load config: {}", e)))?;
+    
+    let augmenter = config.to_channel_augmentation();
     let tensor = augmenter.process_image(image_bytes)?;
 
     let _num_channels = check_channels(&tensor)?;

@@ -1,0 +1,57 @@
+version: 1.0
+
+augmentations:
+  dwt:
+    enabled: true
+    params:
+      python_wavelet: "bior2.2"  # Python specific
+      rust_implementation: "haar" # Rust specific
+
+  dct:
+    enabled: true
+    params:
+      normalization: "ortho"
+
+  sobel:
+    enabled: true
+    params: {}
+
+  grayscale:
+    enabled: false
+    params: {}
+
+  hog:
+    enabled: false
+    params:
+      orientations: 9
+      pixels_per_cell: [8, 8]
+      cells_per_block: [1, 1]  # Python specific
+      visualize: true          # Python specific
+
+  fft:
+    enabled: true
+    params: {}
+
+  lbp:
+    enabled: true
+    params:
+      n_points: 8
+      radius: 1
+      method: "uniform"  # Python specific
+
+  ltp:
+    enabled: false
+    params:
+      threshold: 0.1
+
+defaults:
+  normalization:
+    epsilon: 1.0e-8
+    min_max: true
+
+image:
+  size: [224, 224]
+  channels: 3
+  preprocessing:
+    resize_method: "triangle"  # maps to FilterType::Triangle in Rust
+    center_crop: true         # Python specific
