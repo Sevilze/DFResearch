@@ -403,11 +403,11 @@ input[type="file"] {
 }
 
 .ai-detected h2 {
-    color: var(--danger-bg);
+    color: var(--danger-text);
 }
 
 .not-ai h2 {
-    color: var(--success-bg);
+    color: var(--success-text);
 }
 
 .ai-detected h2 i {
