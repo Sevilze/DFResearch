@@ -59,6 +59,8 @@ pub enum Msg {
     HandleDrop(DragEvent),
     HandlePaste(ClipboardEvent),
     SetProcessingMode(ProcessingMode),
+    ResetLoadingState,
+    SetFutureRequests(usize),
 }
 
 impl Component for Model {
@@ -122,7 +124,17 @@ impl Component for Model {
             Msg::HandleDrop(event) => handle_drop(self, ctx, event),
             Msg::HandlePaste(event) => handle_paste(self, ctx, event),
             Msg::InternalExecuteClearAll => handle_internal_execute_clear_all(self),
-            Msg::SetProcessingMode(mode) => handle_set_processing_mode(self, ctx, mode)
+            Msg::SetProcessingMode(mode) => handle_set_processing_mode(self, ctx, mode),
+            Msg::ResetLoadingState => {
+                self.loading = false;
+                self.future_requests = 0;
+                true
+            },
+            Msg::SetFutureRequests(count) => {
+                self.future_requests = count;
+                self.loading = count > 0;
+                true
+            },
         }
     }
 

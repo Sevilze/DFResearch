@@ -1,12 +1,18 @@
-use yew::prelude::*;
-use std::rc::Rc;
-use std::cell::RefCell;
-use js_sys::Date;
-use gloo_timers::callback::Timeout;
 use super::super::Model;
+use gloo_file::File as GlooFile;
+use gloo_timers::callback::Timeout;
+use js_sys::Date;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use web_sys::FileList;
+use yew::prelude::*;
 
 pub fn generate_id() -> u64 {
-    (Date::new_0().get_time() * 1000.0 + js_sys::Math::random() * 1000.0) as u64
+    static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let now = Date::now() as u64;
+    let count = ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+    now * 1000 + (count % 1000)
 }
 
 // Debounce function to limit button events
@@ -33,6 +39,15 @@ where
     })
 }
 
+pub fn extract_image_files(file_list: &FileList) -> Vec<GlooFile> {
+    let files: Vec<GlooFile> = (0..file_list.length())
+        .filter_map(|i| file_list.item(i))
+        .filter(|file| file.type_().starts_with("image/"))
+        .map(GlooFile::from)
+        .collect();
+    files
+}
+
 pub fn render_error_message(model: &Model) -> Html {
     if let Some(error_msg) = &model.error {
         html! {
@@ -45,4 +60,3 @@ pub fn render_error_message(model: &Model) -> Html {
         html! {}
     }
 }
-

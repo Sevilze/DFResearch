@@ -1,10 +1,9 @@
 use yew::prelude::*;
-use gloo_file::File as GlooFile;
-use web_sys::{DragEvent, HtmlInputElement, FileList};
+use web_sys::{DragEvent, HtmlInputElement};
 use wasm_bindgen::JsCast;
 use super::super::Model;
 use super::super::Msg;
-use super::utils::debounce;
+use super::utils::{debounce, extract_image_files};
 
 pub fn render_upload_section(model: &Model, ctx: &Context<Model>) -> Html {
     let limit_reached = model.files.len() >= 15;
@@ -97,12 +96,4 @@ fn render_file_input_area(model: &Model, ctx: &Context<Model>, limit_reached: bo
             </div>
         </>
     }
-}
-
-fn extract_image_files(file_list: &FileList) -> Vec<GlooFile> {
-    (0..file_list.length())
-        .filter_map(|i| file_list.item(i))
-        .filter(|file| file.type_().starts_with("image/"))
-        .map(GlooFile::from)
-        .collect()
 }

@@ -21,59 +21,51 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
     let polling_clone = polling.clone();
 
     async fn fetch_task_status(task_id: &str, task: UseStateHandle<Option<Task>>) -> Result<bool, ()> {
-        match Request::get(&format!("/api/tasks/{}", task_id)).send().await {
-            Ok(resp) => {
-                let status_code = resp.status();
-                if status_code == 202 {
-                    Ok(true)
-                } else if status_code == 200 {
-                    if let Ok(fetched) = resp.json::<Task>().await {
-                        task.set(Some(fetched.clone()));
-                        if let Some(status) = &fetched.status {
-                            if status == "completed" || status == "failed" {
-                                return Ok(false);
-                            } else if status == "pending" {
-                                return Ok(true);
-                            }
-                        }
-                        Ok(false)
-                    } else {
-                        Ok(false)
-                    }
-                } else {
-                    Ok(false)
-                }
-            }
-            Err(err) => {
+        let resp = Request::get(&format!("/api/tasks/{}", task_id))
+            .send()
+            .await
+            .map_err(|err| {
                 error!(format!("Fetch error: {:?}", err));
-                Err(())
+            })?;
+
+        match resp.status() {
+            202 => Ok(true),
+            200 => {
+                let fetched = resp.json::<Task>().await.map_err(|_| ())?;
+                task.set(Some(fetched.clone()));
+                
+                let should_continue = fetched.status
+                    .as_deref()
+                    .map(|status| status == "pending")
+                    .unwrap_or(false);
+                
+                Ok(should_continue)
             }
+            _ => Ok(false)
         }
     }
 
-    fn start_polling(task_id: String, task: UseStateHandle<Option<Task>>, polling: UseStateHandle<Option<Interval>>) {
-        let interval = Interval::new(2000, {
+    fn start_polling(
+        task_id: String,
+        task: UseStateHandle<Option<Task>>,
+        polling: UseStateHandle<Option<Interval>>
+    ) {
+        let polling_clone = polling.clone();
+        let interval = Interval::new(2000, move || {
             let task = task.clone();
-            let polling = polling.clone();
+            let polling = polling_clone.clone();
             let task_id = task_id.clone();
-            move || {
-                let task = task.clone();
-                let polling = polling.clone();
-                let task_id = task_id.clone();
-                spawn_local(async move {
-                    match fetch_task_status(&task_id, task.clone()).await {
-                        Ok(continue_polling) => {
-                            if !continue_polling {
-                                polling.set(None);
-                            }
-                        }
-                        Err(_) => {
-                            polling.set(None);
-                        }
-                    }
-                });
-            }
+            
+            spawn_local(async move {
+                let should_continue = fetch_task_status(&task_id, task).await
+                    .unwrap_or(false);
+                
+                if !should_continue {
+                    polling.set(None);
+                }
+            });
         });
+        
         polling.set(Some(interval));
     }
 
@@ -83,56 +75,50 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
 
         use_effect_with_deps(
             move |task_id_opt| {
+                // Reset state
                 task.set(None);
                 polling_outer.set(None);
 
                 if let Some(task_id) = task_id_opt.clone() {
                     let task = task.clone();
                     let polling = polling_outer.clone();
+                    
                     spawn_local(async move {
-                        match fetch_task_status(&task_id, task.clone()).await {
-                            Ok(continue_polling) => {
-                                if continue_polling {
-                                    start_polling(task_id, task, polling);
-                                }
-                            }
-                            Err(_) => {
-                            }
+                        if let Ok(true) = fetch_task_status(&task_id, task.clone()).await {
+                            start_polling(task_id, task, polling);
                         }
                     });
                 }
 
-                move || {
-                    polling_outer.set(None);
-                }
+                move || polling_outer.set(None)
             },
             task_id_for_closure,
         );
     }
 
+    let render_task_content = |task: &Task| {
+        html! {
+            <>
+                <p><strong>{"Task ID:"}</strong> {&task.id}</p>
+                <p><strong>{"Status:"}</strong> {task.status.clone().unwrap_or_default()}</p>
+                {
+                    match (&task.result, &task.error) {
+                        (Some(result), _) => html! { <pre>{to_string_pretty(result).unwrap_or_default()}</pre> },
+                        (_, Some(error)) => html! { <p style="color:red;">{error}</p> },
+                        _ => html! {}
+                    }
+                }
+            </>
+        }
+    };
+
     html! {
         <div class="task-status">
             {
-                if props.task_id.is_none() {
-                    html! {}
-                } else if let Some(task) = &*task_clone {
-                    html! {
-                        <>
-                            <p><strong>{"Task ID:"}</strong> {&task.id}</p>
-                            <p><strong>{"Status:"}</strong> {task.status.clone().unwrap_or_default()}</p>
-                            {
-                                if let Some(result) = &task.result {
-                                    html! { <pre>{to_string_pretty(result).unwrap_or_default()}</pre> }
-                                } else if let Some(error) = &task.error {
-                                    html! { <p style="color:red;">{error}</p> }
-                                } else {
-                                    html! {}
-                                }
-                            }
-                        </>
-                    }
-                } else {
-                    html! { <p>{"Loading task status..."}</p> }
+                match (&props.task_id, &*task_clone) {
+                    (None, _) => html! {},
+                    (Some(_), Some(task)) => render_task_content(task),
+                    _ => html! { <p>{"Loading task status..."}</p> }
                 }
             }
         </div>
