@@ -165,7 +165,7 @@ class DataLoaderWrapper:
         self.recompute_stats = recompute_norm
 
         config = AugmentationConfig.load()
-        self.augmenter = config.to_channel_augmentation()
+        self.augmenter = config.to_channel_augmentation(ChannelAugmentation)
 
         self.base_transform = transforms.Compose([
             transforms.Resize(config.image.size[0]),

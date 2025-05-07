@@ -1,8 +1,9 @@
 import yaml
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Callable, TypeVar
 import os
-from .dataloader import ChannelAugmentation
+
+T = TypeVar('T')
 
 @dataclass
 class AugmentationSpec:
@@ -52,9 +53,8 @@ class AugmentationConfig:
             )
         )
 
-    def to_channel_augmentation(self) -> 'ChannelAugmentation':
-        
-        return ChannelAugmentation(
+    def to_channel_augmentation(self, factory: Callable[..., T]) -> T:
+        return factory(
             add_dwt=self.augmentations['dwt'].enabled,
             add_dct=self.augmentations['dct'].enabled,
             add_sobel=self.augmentations['sobel'].enabled,

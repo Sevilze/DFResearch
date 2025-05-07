@@ -1,11 +1,11 @@
-use tch::{ Tensor, Kind };
-use image::{ ImageBuffer, Luma };
-use rustfft::{ FftPlanner, num_complex::Complex };
-use rustdct::DctPlanner;
-use ndarray::{ Array2, s };
-use std::f32::consts::PI;
-use super::model::InferenceError;
 use super::config::AugmentationConfig;
+use super::model::InferenceError;
+use image::{ImageBuffer, Luma};
+use ndarray::{s, Array2};
+use rustdct::DctPlanner;
+use rustfft::{num_complex::Complex, FftPlanner};
+use std::f32::consts::PI;
+use tch::{Kind, Tensor};
 
 pub struct ChannelAugmentation {
     pub add_dwt: bool,
@@ -45,26 +45,21 @@ impl Default for ChannelAugmentation {
 
 impl ChannelAugmentation {
     pub fn process_image(&self, image_bytes: &[u8]) -> Result<Tensor, InferenceError> {
-        let img = image
-            ::load_from_memory(image_bytes)
+        let img = image::load_from_memory(image_bytes)
             .map_err(|e| InferenceError::PreprocessingError(e.to_string()))?
             .resize_exact(224, 224, image::imageops::FilterType::Triangle)
             .to_rgb8();
 
         let (width, height) = img.dimensions();
 
-        let rgb_data: Vec<f32> = img
-            .as_raw()
-            .iter()
-            .map(|v| (*v as f32) / 255.0)
-            .collect();
+        let rgb_data: Vec<f32> = img.as_raw().iter().map(|v| (*v as f32) / 255.0).collect();
         println!("Creating RGB tensor");
         let rgb_tensor = Tensor::f_from_slice(&rgb_data)
-            .map_err(|e|
+            .map_err(|e| {
                 InferenceError::PreprocessingError(format!("Failed to create RGB tensor: {:?}", e))
-            )?
-            .reshape(&[height as i64, width as i64, 3])
-            .permute(&[2, 0, 1]);
+            })?
+            .reshape([height as i64, width as i64, 3])
+            .permute([2, 0, 1]);
 
         let mut channels: Vec<Tensor> = vec![rgb_tensor];
 
@@ -73,7 +68,9 @@ impl ChannelAugmentation {
             let r = pixel[0] as f32;
             let g = pixel[1] as f32;
             let b = pixel[2] as f32;
-            let y_val = (0.2989 * r + 0.587 * g + 0.114 * b).round().clamp(0.0, 255.0) as u8;
+            let y_val = (0.2989 * r + 0.587 * g + 0.114 * b)
+                .round()
+                .clamp(0.0, 255.0) as u8;
             gray_img.put_pixel(x, y, Luma([y_val]));
         }
 
@@ -83,26 +80,27 @@ impl ChannelAugmentation {
                 .as_raw()
                 .iter()
                 .map(|v| (*v as f32) / 255.0)
-                .collect()
-        ).map_err(|e|
-            InferenceError::PreprocessingError(
-                format!("Failed to create grayscale ndarray: {:?}", e)
-            )
-        )?;
+                .collect(),
+        )
+        .map_err(|e| {
+            InferenceError::PreprocessingError(format!(
+                "Failed to create grayscale ndarray: {:?}",
+                e
+            ))
+        })?;
 
         if self.add_gray {
-            let gray_slice = gray_np
-                .as_slice()
-                .ok_or_else(||
-                    InferenceError::PreprocessingError("Gray ndarray not contiguous".to_string())
-                )?;
+            let gray_slice = gray_np.as_slice().ok_or_else(|| {
+                InferenceError::PreprocessingError("Gray ndarray not contiguous".to_string())
+            })?;
             let gray_tensor = Tensor::f_from_slice(gray_slice)
-                .map_err(|e|
-                    InferenceError::PreprocessingError(
-                        format!("Failed to create grayscale tensor: {:?}", e)
-                    )
-                )?
-                .reshape(&[height as i64, width as i64])
+                .map_err(|e| {
+                    InferenceError::PreprocessingError(format!(
+                        "Failed to create grayscale tensor: {:?}",
+                        e
+                    ))
+                })?
+                .reshape([height as i64, width as i64])
                 .unsqueeze(0);
             channels.push(gray_tensor);
         }
@@ -130,7 +128,7 @@ impl ChannelAugmentation {
                 &ll_img,
                 width,
                 height,
-                image::imageops::FilterType::Triangle
+                image::imageops::FilterType::Triangle,
             );
 
             // Convert back to Array2<f32>
@@ -155,11 +153,8 @@ impl ChannelAugmentation {
         }
 
         if self.add_hog {
-            let hog_res = hog_visualization(
-                &gray_img,
-                self.hog_orientations,
-                self.hog_pixels_per_cell
-            );
+            let hog_res =
+                hog_visualization(&gray_img, self.hog_orientations, self.hog_pixels_per_cell);
             channels.push(array_to_tensor(&hog_res));
         }
 
@@ -186,7 +181,9 @@ fn normalize_array(arr: &Array2<f32>) -> Array2<f32> {
 
 fn array_to_tensor(arr: &Array2<f32>) -> Tensor {
     let arr_norm = normalize_array(arr);
-    let slice = arr_norm.as_slice().expect("Normalized array not contiguous");
+    let slice = arr_norm
+        .as_slice()
+        .expect("Normalized array not contiguous");
     Tensor::f_from_slice(slice)
         .expect("Failed to create tensor from normalized array")
         .reshape(&[arr.shape()[0] as i64, arr.shape()[1] as i64])
@@ -199,12 +196,11 @@ fn fft_magnitude(gray: &Array2<f32>) -> Array2<f32> {
     let fft = planner.plan_fft_forward(w);
     let mut data: Vec<Complex<f32>> = gray
         .outer_iter()
-        .flat_map(|row|
-            row
-                .iter()
+        .flat_map(|row| {
+            row.iter()
                 .map(|&x| Complex { re: x, im: 0.0 })
                 .collect::<Vec<_>>()
-        )
+        })
         .collect();
 
     // 1D FFT on rows
@@ -215,7 +211,7 @@ fn fft_magnitude(gray: &Array2<f32>) -> Array2<f32> {
     }
 
     // transpose
-    let mut transposed = vec![Complex{re:0.0, im:0.0}; h*w];
+    let mut transposed = vec![Complex { re: 0.0, im: 0.0 }; h * w];
     for y in 0..h {
         for x in 0..w {
             transposed[x * h + y] = data[y * w + x];
@@ -231,7 +227,7 @@ fn fft_magnitude(gray: &Array2<f32>) -> Array2<f32> {
     }
 
     // transpose back
-    let mut final_data = vec![Complex{re:0.0, im:0.0}; h*w];
+    let mut final_data = vec![Complex { re: 0.0, im: 0.0 }; h * w];
     for y in 0..h {
         for x in 0..w {
             final_data[y * w + x] = transposed[x * h + y];
@@ -261,7 +257,7 @@ fn haar_dwt_ll(gray: &Array2<f32>) -> Array2<f32> {
         0.1767766952966369,
         0.0,
         0.0,
-        0.0
+        0.0,
     ];
     let (h, _w) = gray.dim();
 
@@ -347,7 +343,10 @@ fn dct2d(gray: &Array2<f32>) -> Array2<f32> {
 
     // DCT on columns (which are now rows in transposed view)
     for i in 0..data_t_fixed.len_of(ndarray::Axis(0)) {
-        let mut col_vec = data_t_fixed.index_axis(ndarray::Axis(0), i).to_owned().into_raw_vec();
+        let mut col_vec = data_t_fixed
+            .index_axis(ndarray::Axis(0), i)
+            .to_owned()
+            .into_raw_vec();
         dct_h.process_dct2(&mut col_vec);
         // Orthonormal scaling for columns
         let scale = (2.0 * (h as f32).sqrt()).recip();
@@ -355,7 +354,9 @@ fn dct2d(gray: &Array2<f32>) -> Array2<f32> {
             *v *= scale;
         }
         let col_array = ndarray::Array1::from(col_vec);
-        data_t_fixed.index_axis_mut(ndarray::Axis(0), i).assign(&col_array);
+        data_t_fixed
+            .index_axis_mut(ndarray::Axis(0), i)
+            .assign(&col_array);
     }
 
     data_t.reversed_axes()
@@ -368,16 +369,8 @@ fn sobel_edges(gray_img: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Array2<f32> {
     let mut grad_x = Array2::<f32>::zeros((h, w));
     let mut grad_y = Array2::<f32>::zeros((h, w));
 
-    let kernel_x = [
-        [-1.0, 0.0, 1.0],
-        [-2.0, 0.0, 2.0],
-        [-1.0, 0.0, 1.0],
-    ];
-    let kernel_y = [
-        [-1.0, -2.0, -1.0],
-        [0.0, 0.0, 0.0],
-        [1.0, 2.0, 1.0],
-    ];
+    let kernel_x = [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]];
+    let kernel_y = [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]];
 
     for y in 1..h - 1 {
         for x in 1..w - 1 {
@@ -385,8 +378,8 @@ fn sobel_edges(gray_img: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Array2<f32> {
             let mut sum_y = 0.0;
             for ky in 0..3 {
                 for kx in 0..3 {
-                    let pixel = gray_img.get_pixel((x + kx - 1) as u32, (y + ky - 1) as u32)
-                        [0] as f32;
+                    let pixel =
+                        gray_img.get_pixel((x + kx - 1) as u32, (y + ky - 1) as u32)[0] as f32;
                     sum_x += kernel_x[ky][kx] * pixel;
                     sum_y += kernel_y[ky][kx] * pixel;
                 }
@@ -408,7 +401,7 @@ fn sobel_edges(gray_img: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Array2<f32> {
 fn hog_visualization(
     gray_img: &ImageBuffer<Luma<u8>, Vec<u8>>,
     orientations: usize,
-    pixels_per_cell: (usize, usize)
+    pixels_per_cell: (usize, usize),
 ) -> Array2<f32> {
     let (w, h) = gray_img.dimensions();
     let w = w as usize;
@@ -418,12 +411,10 @@ fn hog_visualization(
 
     for y in 1..h - 1 {
         for x in 1..w - 1 {
-            grad_x[[y, x]] =
-                (gray_img.get_pixel((x + 1) as u32, y as u32)[0] as f32) -
-                (gray_img.get_pixel((x - 1) as u32, y as u32)[0] as f32);
-            grad_y[[y, x]] =
-                (gray_img.get_pixel(x as u32, (y + 1) as u32)[0] as f32) -
-                (gray_img.get_pixel(x as u32, (y - 1) as u32)[0] as f32);
+            grad_x[[y, x]] = (gray_img.get_pixel((x + 1) as u32, y as u32)[0] as f32)
+                - (gray_img.get_pixel((x - 1) as u32, y as u32)[0] as f32);
+            grad_y[[y, x]] = (gray_img.get_pixel(x as u32, (y + 1) as u32)[0] as f32)
+                - (gray_img.get_pixel(x as u32, (y - 1) as u32)[0] as f32);
         }
     }
 
@@ -455,20 +446,13 @@ fn hog_visualization(
                     if yy >= h || xx >= w {
                         continue;
                     }
-                    let bin =
-                        (
-                            (
-                                (orientation[[yy, xx]] / 180.0) *
-                                (orientations as f32)
-                            ).floor() as usize
-                        ) % orientations;
+                    let bin = (((orientation[[yy, xx]] / 180.0) * (orientations as f32)).floor()
+                        as usize)
+                        % orientations;
                     hist[bin] += magnitude[[yy, xx]];
                 }
             }
-            let max_hist = hist
-                .iter()
-                .cloned()
-                .fold(0.0 / 0.0, f32::max);
+            let max_hist = hist.iter().cloned().fold(0.0 / 0.0, f32::max);
             for y in 0..cell_h {
                 for x in 0..cell_w {
                     let yy = cy * cell_h + y;
@@ -487,7 +471,7 @@ fn hog_visualization(
 fn lbp_uniform(
     gray_img: &ImageBuffer<Luma<u8>, Vec<u8>>,
     n_points: usize,
-    radius: usize
+    radius: usize,
 ) -> Array2<f32> {
     let (w, h) = gray_img.dimensions();
     let w = w as usize;
@@ -502,10 +486,9 @@ fn lbp_uniform(
                 let theta = (2.0 * PI * (p as f32)) / (n_points as f32);
                 let dx = ((radius as f32) * theta.cos()).round() as isize;
                 let dy = ((radius as f32) * theta.sin()).round() as isize;
-                let neighbor = gray_img.get_pixel(
-                    ((x as isize) + dx) as u32,
-                    ((y as isize) + dy) as u32
-                )[0] as f32;
+                let neighbor = gray_img
+                    .get_pixel(((x as isize) + dx) as u32, ((y as isize) + dy) as u32)[0]
+                    as f32;
                 pattern.push(if neighbor >= center { 1 } else { 0 });
             }
 
@@ -574,7 +557,7 @@ fn ltp_pattern(gray: &Array2<f32>, threshold: f32) -> Array2<f32> {
 pub fn preprocess(image_bytes: &[u8]) -> Result<Tensor, InferenceError> {
     let config = AugmentationConfig::load()
         .map_err(|e| InferenceError::PreprocessingError(format!("Failed to load config: {}", e)))?;
-    
+
     let augmenter = config.to_channel_augmentation();
     let tensor = augmenter.process_image(image_bytes)?;
 
@@ -587,22 +570,17 @@ pub fn preprocess(image_bytes: &[u8]) -> Result<Tensor, InferenceError> {
 pub fn check_channels(tensor: &Tensor) -> Result<usize, InferenceError> {
     let shape = tensor.size();
     if shape.len() != 4 {
-        return Err(
-            InferenceError::PreprocessingError(
-                format!(
-                    "Expected tensor with 4 dimensions (batch, channels, height, width), got shape: {:?}",
-                    shape
-                )
-            )
-        );
+        return Err(InferenceError::PreprocessingError(format!(
+            "Expected tensor with 4 dimensions (batch, channels, height, width), got shape: {:?}",
+            shape
+        )));
     }
 
     if shape[2] != 224 || shape[3] != 224 {
-        return Err(
-            InferenceError::PreprocessingError(
-                format!("Expected spatial size 224x224, got {}x{}", shape[2], shape[3])
-            )
-        );
+        return Err(InferenceError::PreprocessingError(format!(
+            "Expected spatial size 224x224, got {}x{}",
+            shape[2], shape[3]
+        )));
     }
 
     let num_channels = shape[1] as usize;
