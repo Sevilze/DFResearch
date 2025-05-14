@@ -1,6 +1,6 @@
+use shared::Task;
 use sqlx::PgPool;
 use uuid::Uuid;
-use shared::Task;
 
 #[derive(Clone)]
 pub struct TaskRepository {
@@ -48,11 +48,7 @@ impl TaskRepository {
         Ok(rec)
     }
 
-    pub async fn update_task_status(
-        &self,
-        id: Uuid,
-        status: &str,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn update_task_status(&self, id: Uuid, status: &str) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"
             UPDATE tasks SET status = $1, updated_at = now()
@@ -84,11 +80,7 @@ impl TaskRepository {
         Ok(())
     }
 
-    pub async fn update_task_error(
-        &self,
-        id: Uuid,
-        error_msg: &str,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn update_task_error(&self, id: Uuid, error_msg: &str) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"
             UPDATE tasks SET error = $1, status = 'failed', updated_at = now()

@@ -1,7 +1,7 @@
-use yew::prelude::*;
-use super::super::{Model, FileData, Msg};
-use shared::ProcessingMode; // Import ProcessingMode
+use super::super::{FileData, Model, Msg};
 use super::utils::debounce;
+use shared::ProcessingMode; // Import ProcessingMode
+use yew::prelude::*;
 
 pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
     if model.files.is_empty() {
@@ -144,7 +144,8 @@ fn render_analyze_button_content(model: &Model) -> Html {
     if model.loading {
         html! { <><i class="fa-solid fa-spinner fa-spin"></i>{" Analyzing..."}</> }
     } else {
-        let filename = model.selected_file_id
+        let filename = model
+            .selected_file_id
             .and_then(|id| model.files.get(&id))
             .map(|fd| fd.file.name())
             .unwrap_or_else(|| "Selected Image".to_string());

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -12,25 +12,45 @@
       <header class="app-header">
         <h1>Image Upload and Preview</h1>
         <div class="top-right">
-  <button id="theme-toggle" class="theme-toggle">
-    <img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f319.svg" alt="Toggle Theme" class="toggle-icon" />
-  </button>
-</div>
+          <button id="theme-toggle" class="theme-toggle">
+            <img
+              src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f319.svg"
+              alt="Toggle Theme"
+              class="toggle-icon"
+            />
+          </button>
+        </div>
       </header>
 
-      <input type="file" id="file-input" multiple accept="image/*" style="display: none;" />
+      <input
+        type="file"
+        id="file-input"
+        multiple
+        accept="image/*"
+        style="display: none"
+      />
       <button id="upload-button">Select Images</button>
 
       <div id="drop-zone">
         <p>Or drag & drop images here</p>
       </div>
 
-<div id="image-preview-container"></div>
-<div id="preview-container">
-  <img id="actual-image-preview" src="" alt="Image Preview" style="max-width: 100%; height: auto; display: block; margin-bottom: 10px;">
-  <h2>Previews:</h2>
-  <div id="image-previews"></div>
-</div>
+      <div id="image-preview-container"></div>
+      <div id="preview-container">
+        <img
+          id="actual-image-preview"
+          src=""
+          alt="Image Preview"
+          style="
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin-bottom: 10px;
+          "
+        />
+        <h2>Previews:</h2>
+        <div id="image-previews"></div>
+      </div>
     </div>
     <div id="app"></div>
   </body>

@@ -1,10 +1,10 @@
-use yew::prelude::*;
-use gloo_net::http::Request;
 use gloo_console::error;
+use gloo_net::http::Request;
 use gloo_timers::callback::Interval;
-use wasm_bindgen_futures::spawn_local;
 use serde_json::to_string_pretty;
 use shared::Task;
+use wasm_bindgen_futures::spawn_local;
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct TaskStatusProps {
@@ -20,7 +20,10 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
     let task_clone = task.clone();
     let polling_clone = polling.clone();
 
-    async fn fetch_task_status(task_id: &str, task: UseStateHandle<Option<Task>>) -> Result<bool, ()> {
+    async fn fetch_task_status(
+        task_id: &str,
+        task: UseStateHandle<Option<Task>>,
+    ) -> Result<bool, ()> {
         let resp = Request::get(&format!("/api/tasks/{}", task_id))
             .send()
             .await
@@ -33,39 +36,39 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
             200 => {
                 let fetched = resp.json::<Task>().await.map_err(|_| ())?;
                 task.set(Some(fetched.clone()));
-                
-                let should_continue = fetched.status
+
+                let should_continue = fetched
+                    .status
                     .as_deref()
                     .map(|status| status == "pending")
                     .unwrap_or(false);
-                
+
                 Ok(should_continue)
             }
-            _ => Ok(false)
+            _ => Ok(false),
         }
     }
 
     fn start_polling(
         task_id: String,
         task: UseStateHandle<Option<Task>>,
-        polling: UseStateHandle<Option<Interval>>
+        polling: UseStateHandle<Option<Interval>>,
     ) {
         let polling_clone = polling.clone();
         let interval = Interval::new(2000, move || {
             let task = task.clone();
             let polling = polling_clone.clone();
             let task_id = task_id.clone();
-            
+
             spawn_local(async move {
-                let should_continue = fetch_task_status(&task_id, task).await
-                    .unwrap_or(false);
-                
+                let should_continue = fetch_task_status(&task_id, task).await.unwrap_or(false);
+
                 if !should_continue {
                     polling.set(None);
                 }
             });
         });
-        
+
         polling.set(Some(interval));
     }
 
@@ -73,8 +76,9 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
         let task = task_clone.clone();
         let polling_outer = polling_clone.clone();
 
-        use_effect_with_deps(
-            move |task_id_opt| {
+        use_effect_with(
+            task_id_for_closure.clone(),
+            move |task_id_opt: &Option<String>| {
                 // Reset state
                 task.set(None);
                 polling_outer.set(None);
@@ -82,17 +86,16 @@ pub fn task_status(props: &TaskStatusProps) -> Html {
                 if let Some(task_id) = task_id_opt.clone() {
                     let task = task.clone();
                     let polling = polling_outer.clone();
-                    
+
                     spawn_local(async move {
                         if let Ok(true) = fetch_task_status(&task_id, task.clone()).await {
-                            start_polling(task_id, task, polling);
+                            start_polling(task_id.to_string(), task, polling);
                         }
                     });
                 }
 
                 move || polling_outer.set(None)
             },
-            task_id_for_closure,
         );
     }
 

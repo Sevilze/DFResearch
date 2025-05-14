@@ -1,22 +1,22 @@
 use gloo_events::EventListener;
 use gloo_file::{File as GlooFile, ObjectUrl};
+use gloo_timers::callback::Timeout;
 use shared::{InferenceResponse, ProcessingMode};
 use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 use web_sys::ClipboardEvent;
 use yew::prelude::*;
-use gloo_timers::callback::Timeout;
 
-mod components;
 mod api;
+mod components;
+use api::TaskStatus;
+use components::handlers::*;
 use components::header::render_header;
-use components::theme_toggle::render_theme_toggle;
-use components::upload_section::render_upload_section;
 use components::preview_area::render_preview_area;
 use components::results::render_results;
-use components::handlers::*;
+use components::theme_toggle::render_theme_toggle;
+use components::upload_section::render_upload_section;
 use components::utils::render_error_message;
-use api::TaskStatus;
 
 pub struct Model {
     pub files: HashMap<u64, FileData>,
@@ -105,7 +105,9 @@ impl Component for Model {
             Msg::ClearAllFiles => handle_clear_all_files(self, ctx),
             Msg::AnalyzeSelected => handle_analyze_selected(self, ctx),
             Msg::AnalyzeAll => handle_analyze_all(self, ctx),
-            Msg::InferenceResult(file_id, response) => handle_inference_result(self, file_id, response),
+            Msg::InferenceResult(file_id, response) => {
+                handle_inference_result(self, file_id, response)
+            }
             Msg::SetError(error) => {
                 self.error = error;
                 self.loading = false;
@@ -129,12 +131,12 @@ impl Component for Model {
                 self.loading = false;
                 self.future_requests = 0;
                 true
-            },
+            }
             Msg::SetFutureRequests(count) => {
                 self.future_requests = count;
                 self.loading = count > 0;
                 true
-            },
+            }
         }
     }
 

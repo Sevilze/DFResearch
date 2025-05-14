@@ -53,8 +53,8 @@ pub struct PreprocessingConfig {
 
 impl AugmentationConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-            .map_err(|_| "Failed to get manifest directory")?;
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").map_err(|_| "Failed to get manifest directory")?;
         let config_path = format!("{}/../config/augmentations.yaml", manifest_dir);
         let config_str = std::fs::read_to_string(config_path)?;
         let config: AugmentationConfig = serde_yaml::from_str(&config_str)?;
@@ -71,26 +71,48 @@ impl AugmentationConfig {
             add_fft: self.augmentations.fft.enabled,
             add_lbp: self.augmentations.lbp.enabled,
             add_ltp: self.augmentations.ltp.enabled,
-            hog_orientations: self.augmentations.hog.params.get("orientations")
+            hog_orientations: self
+                .augmentations
+                .hog
+                .params
+                .get("orientations")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(9) as usize,
             hog_pixels_per_cell: {
-                let pixels = self.augmentations.hog.params.get("pixels_per_cell")
+                let pixels = self
+                    .augmentations
+                    .hog
+                    .params
+                    .get("pixels_per_cell")
                     .and_then(|v| v.as_sequence())
-                    .map(|seq| (
-                        seq[0].as_u64().unwrap_or(8) as usize,
-                        seq[1].as_u64().unwrap_or(8) as usize
-                    ))
+                    .map(|seq| {
+                        (
+                            seq[0].as_u64().unwrap_or(8) as usize,
+                            seq[1].as_u64().unwrap_or(8) as usize,
+                        )
+                    })
                     .unwrap_or((8, 8));
                 pixels
             },
-            lbp_n_points: self.augmentations.lbp.params.get("n_points")
+            lbp_n_points: self
+                .augmentations
+                .lbp
+                .params
+                .get("n_points")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(8) as usize,
-            lbp_radius: self.augmentations.lbp.params.get("radius")
+            lbp_radius: self
+                .augmentations
+                .lbp
+                .params
+                .get("radius")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(1) as usize,
-            ltp_threshold: self.augmentations.ltp.params.get("threshold")
+            ltp_threshold: self
+                .augmentations
+                .ltp
+                .params
+                .get("threshold")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.1) as f32,
         }

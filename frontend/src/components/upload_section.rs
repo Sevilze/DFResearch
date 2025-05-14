@@ -1,9 +1,9 @@
-use yew::prelude::*;
-use web_sys::{DragEvent, HtmlInputElement};
-use wasm_bindgen::JsCast;
 use super::super::Model;
 use super::super::Msg;
 use super::utils::{debounce, extract_image_files};
+use wasm_bindgen::JsCast;
+use web_sys::{DragEvent, HtmlInputElement};
+use yew::prelude::*;
 
 pub fn render_upload_section(model: &Model, ctx: &Context<Model>) -> Html {
     let limit_reached = model.files.len() >= 15;
@@ -48,7 +48,12 @@ fn render_file_input_area(model: &Model, ctx: &Context<Model>, limit_reached: bo
 
     let handle_drop = link.callback(Msg::HandleDrop);
     let trigger_file_input = Callback::from(|_| {
-        if let Some(input) = web_sys::window().unwrap().document().unwrap().get_element_by_id("file-input") {
+        if let Some(input) = web_sys::window()
+            .unwrap()
+            .document()
+            .unwrap()
+            .get_element_by_id("file-input")
+        {
             if let Ok(html_input) = input.dyn_into::<web_sys::HtmlElement>() {
                 html_input.click();
             }

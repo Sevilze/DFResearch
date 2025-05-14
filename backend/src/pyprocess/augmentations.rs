@@ -186,7 +186,7 @@ fn array_to_tensor(arr: &Array2<f32>) -> Tensor {
         .expect("Normalized array not contiguous");
     Tensor::f_from_slice(slice)
         .expect("Failed to create tensor from normalized array")
-        .reshape(&[arr.shape()[0] as i64, arr.shape()[1] as i64])
+        .reshape([arr.shape()[0] as i64, arr.shape()[1] as i64])
         .unsqueeze(0)
 }
 
@@ -252,9 +252,9 @@ fn haar_dwt_ll(gray: &Array2<f32>) -> Array2<f32> {
     let dec_lo = vec![
         0.0,
         0.0,
-        0.1767766952966369,
-        0.3535533905932738,
-        0.1767766952966369,
+        0.176_776_69,
+        0.353_553_38,
+        0.176_776_69,
         0.0,
         0.0,
         0.0,
@@ -304,7 +304,7 @@ fn dwt_1d(signal: &[f32], low_filter: &[f32]) -> Vec<f32> {
 
     for i in (0..len + pad * 2).step_by(2) {
         let mut sum = 0.0;
-        for k in 0..filter_len {
+        for (k, _item) in low_filter.iter().enumerate().take(filter_len) {
             let idx_signed = (i as isize) + (k as isize) - (pad as isize);
             let val = if idx_signed < 0 || idx_signed >= (len as isize) {
                 0.0
@@ -452,7 +452,7 @@ fn hog_visualization(
                     hist[bin] += magnitude[[yy, xx]];
                 }
             }
-            let max_hist = hist.iter().cloned().fold(0.0 / 0.0, f32::max);
+            let max_hist = hist.iter().cloned().fold(0.0, f32::max);
             for y in 0..cell_h {
                 for x in 0..cell_w {
                     let yy = cy * cell_h + y;

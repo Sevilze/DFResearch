@@ -1,12 +1,12 @@
-mod routes;
-mod pyprocess;
 mod db;
+mod pyprocess;
+mod routes;
 
 use actix_cors::Cors;
 use actix_web::{web, App, HttpServer};
+use db::task_repository::TaskRepository;
 use pyprocess::model::Model;
 use routes::configure_routes;
-use db::task_repository::TaskRepository;
 use std::env;
 use std::sync::{Arc, Mutex};
 

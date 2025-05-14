@@ -1,10 +1,11 @@
-use yew::prelude::*;
 use super::super::Model;
+use yew::prelude::*;
 
 pub fn render_results(model: &Model) -> Html {
     if let Some(selected_id) = model.selected_file_id {
         if let Some(results) = model.results.get(&selected_id) {
-            let predicted_class = results.predictions
+            let predicted_class = results
+                .predictions
                 .iter()
                 .enumerate()
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
@@ -13,7 +14,9 @@ pub fn render_results(model: &Model) -> Html {
 
             let confidence = results.predictions[predicted_class] * 100.0;
             let is_ai = predicted_class == 0;
-            let analyzed_filename = model.files.get(&selected_id)
+            let analyzed_filename = model
+                .files
+                .get(&selected_id)
                 .map_or_else(|| "Analyzed Image".to_string(), |fd| fd.file.name());
 
             html! {

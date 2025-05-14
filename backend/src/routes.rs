@@ -1,16 +1,16 @@
+use crate::db::task_repository::TaskRepository;
+use crate::pyprocess::model::Model;
 use actix_files::Files;
-use actix_web::{web, HttpResponse, Error};
 use actix_multipart::Multipart;
-use serde_json::json;
+use actix_web::{web, Error, HttpResponse};
+use futures::{StreamExt, TryStreamExt};
+use log::{error, info};
 use serde::Serialize;
-use uuid::Uuid;
+use serde_json::json;
+use shared::{InferenceResponse, ProcessingMode};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use log::{info, error};
-use shared::{InferenceResponse, ProcessingMode};
-use futures::{StreamExt, TryStreamExt};
-use crate::pyprocess::model::Model;
-use crate::db::task_repository::TaskRepository;
+use uuid::Uuid;
 
 #[derive(Serialize)]
 struct ErrorResponse {
@@ -19,16 +19,16 @@ struct ErrorResponse {
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig, frontend_dir: String) {
     cfg.service(web::resource("/api/inference").route(web::post().to(handle_inference)))
-    .service(web::resource("/api/tasks").route(web::post().to(create_task)))
-    .service(web::resource("/api/tasks/{task_id}").route(web::get().to(get_task)))
-    .service(Files::new("/static", &frontend_dir).show_files_listing())
-    .service(Files::new("/dist/dir", frontend_dir).index_file("index.html"));
+        .service(web::resource("/api/tasks").route(web::post().to(create_task)))
+        .service(web::resource("/api/tasks/{task_id}").route(web::get().to(get_task)))
+        .service(Files::new("/static", &frontend_dir).show_files_listing())
+        .service(Files::new("/dist/dir", frontend_dir).index_file("index.html"));
 }
 
 async fn handle_inference(
     model: web::Data<Arc<Mutex<Model>>>,
     mut payload: Multipart,
-    task_repo: web::Data<TaskRepository>
+    task_repo: web::Data<TaskRepository>,
 ) -> Result<HttpResponse, Error> {
     let mut results = Vec::new();
     let mut images: Vec<Vec<u8>> = Vec::new();
@@ -37,7 +37,11 @@ async fn handle_inference(
 
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition();
-        let field_name = content_disposition.get_name().unwrap_or("");
+        let field_name = content_disposition
+            .as_ref()
+            .unwrap()
+            .get_name()
+            .unwrap_or("image");
 
         match field_name {
             "image" => {
@@ -82,7 +86,10 @@ async fn handle_inference(
     })?;
 
     if let Err(e) = model_guard.persistent_load(&processing_mode) {
-        error!("Failed to load models for mode {:?}: {:?}", processing_mode, e);
+        error!(
+            "Failed to load models for mode {:?}: {:?}",
+            processing_mode, e
+        );
         return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
             error: format!("Failed to load models for mode {:?}", processing_mode),
         }));
@@ -109,7 +116,7 @@ async fn handle_inference(
                     },
                     "inference": response
                 }));
-            },
+            }
             Err(e) => {
                 let error_msg = format!("Model inference error: {:?}", e);
                 error!("{}", error_msg);
@@ -131,15 +138,32 @@ async fn handle_inference(
     let task_ids_clone = task_ids.clone();
 
     actix_web::rt::spawn(async move {
-        for ((result_json, _image_data), task_id) in results_clone.into_iter().zip(images_clone).zip(task_ids_clone) {
-            match task_repo_clone.create_task_with_id(task_id, None, None).await {
+        for ((result_json, _image_data), task_id) in results_clone
+            .into_iter()
+            .zip(images_clone)
+            .zip(task_ids_clone)
+        {
+            match task_repo_clone
+                .create_task_with_id(task_id, None, None)
+                .await
+            {
                 Ok(_task) => {
                     if let Some(inf) = result_json.get("inference") {
                         let preds_json = inf.get("predictions").cloned().unwrap_or(json!([]));
-                        task_repo_clone.update_task_result(task_id, preds_json).await.ok();
-                        task_repo_clone.update_task_status(task_id, "completed").await.ok();
-                    } else if let Some(err_msg) = result_json.get("error").and_then(|e| e.as_str()) {
-                        task_repo_clone.update_task_error(task_id, err_msg).await.ok();
+                        task_repo_clone
+                            .update_task_result(task_id, preds_json)
+                            .await
+                            .ok();
+                        task_repo_clone
+                            .update_task_status(task_id, "completed")
+                            .await
+                            .ok();
+                    } else if let Some(err_msg) = result_json.get("error").and_then(|e| e.as_str())
+                    {
+                        task_repo_clone
+                            .update_task_error(task_id, err_msg)
+                            .await
+                            .ok();
                     }
                 }
                 Err(e) => {
@@ -149,9 +173,7 @@ async fn handle_inference(
         }
     });
 
-    Ok(HttpResponse::Ok().json(json!({
-        "results": results
-    })))
+    Ok(HttpResponse::Ok().json(json!({ "results": results })))
 }
 
 async fn create_task(task_repo: web::Data<TaskRepository>) -> HttpResponse {
@@ -160,7 +182,9 @@ async fn create_task(task_repo: web::Data<TaskRepository>) -> HttpResponse {
         Ok(task) => HttpResponse::Created().json(task),
         Err(e) => {
             error!("Failed to create task: {:?}", e);
-            let resp = ErrorResponse { error: "Failed to create task.".into() };
+            let resp = ErrorResponse {
+                error: "Failed to create task.".into(),
+            };
             HttpResponse::InternalServerError().json(resp)
         }
     }
@@ -176,16 +200,14 @@ async fn get_task(task_repo: web::Data<TaskRepository>, path: web::Path<String>)
         Ok(Some(task)) => {
             info!("Retrieved task: {}", task_id);
             HttpResponse::Ok().json(task)
-        },
+        }
         Ok(None) => {
             info!("Task not yet created: {}", task_id);
             HttpResponse::Accepted().body("Logging to the DB...")
-        },
+        }
         Err(e) => {
             error!("Error retrieving task {}: {:?}", task_id, e);
             HttpResponse::InternalServerError().body(format!("Error retrieving task: {:?}", e))
         }
     }
 }
-
-
