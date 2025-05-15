@@ -213,47 +213,47 @@ class BaseTrainer:
         if epoch == 0:
             return
 
-        plt.style.use('dark_background')
-        sns.set_theme(style="darkgrid", palette="deep")
+        plt.style.use('default')
+        sns.set_theme(style="whitegrid", palette="deep")
         colors = sns.color_palette("bright", n_colors=6)
         
         epochs_range = range(1, len(self.history["train_loss"]) + 1)
-        fig = plt.figure(figsize=(20, 15), facecolor='#121212')
+        fig = plt.figure(figsize=(20, 15), facecolor='white')
         gs = gridspec.GridSpec(3, 3, figure=fig)
 
-        text_color = 'white'
-        grid_color = '#333333'
+        text_color = 'black'
+        grid_color = '#cccccc'
         
         ax1 = fig.add_subplot(gs[0, 0])
-        ax1.plot(epochs_range, self.history["train_loss"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[0], label="Train Loss") # Increased marker size
-        ax1.plot(epochs_range, self.history["val_loss"], marker='o', markersize=6, linestyle='--', linewidth=2.0, color=colors[1], label="Val Loss") # Increased marker size
+        ax1.plot(epochs_range, self.history["train_loss"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[0], label="Train Loss")
+        ax1.plot(epochs_range, self.history["val_loss"], marker='o', markersize=6, linestyle='--', linewidth=2.0, color=colors[1], label="Val Loss")
         ax1.set_title(f"{self.model_name} Loss", fontsize=14, fontweight='bold', color=text_color)
         ax1.set_xlabel("Epoch", fontsize=12, color=text_color)
         ax1.set_ylabel("Loss", fontsize=12, color=text_color)
-        ax1.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+        ax1.legend(fontsize=10, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
         ax1.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
         ax1.grid(color=grid_color, linestyle='--', linewidth=0.5)
-        ax1.set_facecolor('#1E1E1E')
+        ax1.set_facecolor('white')
 
         ax2 = fig.add_subplot(gs[0, 1])
-        ax2.plot(epochs_range, self.history["train_acc"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[2], label="Train Accuracy") # Increased marker size
-        ax2.plot(epochs_range, self.history["val_acc"], marker='o', markersize=6, linestyle='--', linewidth=2.0, color=colors[3], label="Val Accuracy") # Increased marker size
+        ax2.plot(epochs_range, self.history["train_acc"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[2], label="Train Accuracy")
+        ax2.plot(epochs_range, self.history["val_acc"], marker='o', markersize=6, linestyle='--', linewidth=2.0, color=colors[3], label="Val Accuracy")
         ax2.set_title(f"{self.model_name} Accuracy", fontsize=14, fontweight='bold', color=text_color)
         ax2.set_xlabel("Epoch", fontsize=12, color=text_color)
         ax2.set_ylabel("Accuracy", fontsize=12, color=text_color)
-        ax2.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+        ax2.legend(fontsize=10, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
         ax2.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
         ax2.grid(color=grid_color, linestyle='--', linewidth=0.5)
-        ax2.set_facecolor('#1E1E1E')
+        ax2.set_facecolor('white')
 
         ax3 = fig.add_subplot(gs[0, 2])
-        ax3.plot(epochs_range, self.history["lr"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[4]) # Increased marker size
+        ax3.plot(epochs_range, self.history["lr"], marker='o', markersize=6, linestyle='-', linewidth=2.0, color=colors[4])
         ax3.set_title(f"{self.model_name} Learning Rate", fontsize=14, fontweight='bold', color=text_color)
         ax3.set_xlabel("Epoch", fontsize=12, color=text_color)
         ax3.set_ylabel("Learning Rate", fontsize=12, color=text_color)
         ax3.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
         ax3.grid(color=grid_color, linestyle='--', linewidth=0.5)
-        ax3.set_facecolor('#1E1E1E')
+        ax3.set_facecolor('white')
 
         if hasattr(self, 'metrics_data') and self.metrics_data is not None:
             ax4 = fig.add_subplot(gs[1, 0])
@@ -272,7 +272,7 @@ class BaseTrainer:
             ax4.set_xlabel('Predicted Label', fontsize=12, color=text_color)
             ax4.set_ylabel('True Label', fontsize=12, color=text_color)
             ax4.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
-            ax4.set_facecolor('#1E1E1E')
+            ax4.set_facecolor('white')
 
             ax5 = fig.add_subplot(gs[1, 1])
             n_classes = self.metrics_data['probabilities'].shape[1]
@@ -297,17 +297,17 @@ class BaseTrainer:
                         label=f'Class {i} (AUC = {roc_auc[i]:.3f})'
                     )
 
-            ax5.plot([0, 1], [0, 1], 'w--', lw=1.5, alpha=0.8)
+            ax5.plot([0, 1], [0, 1], 'k--', lw=1.5, alpha=0.8)
             ax5.set_xlim([-0.1, 1.05])
             ax5.set_ylim([0.0, 1.05])
             ax5.set_xlabel('False Positive Rate', fontsize=12, color=text_color)
             ax5.set_ylabel('True Positive Rate', fontsize=12, color=text_color)
             ax5.set_title(f"{self.model_name} ROC Curve with AUC Scores", fontsize=14, fontweight='bold', color=text_color)
-            ax5.legend(loc="lower right", fontsize=9, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax5.legend(loc="lower right", fontsize=9, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
             ax5.tick_params(axis='x', colors=text_color)
             ax5.tick_params(axis='y', colors=text_color)
             ax5.grid(color=grid_color, linestyle='--', linewidth=0.5)
-            ax5.set_facecolor('#1E1E1E')
+            ax5.set_facecolor('white')
 
             ax6 = fig.add_subplot(gs[1, 2])
             precision = dict()
@@ -336,10 +336,10 @@ class BaseTrainer:
             ax6.set_xlabel('Recall', fontsize=12, color=text_color)
             ax6.set_ylabel('Precision', fontsize=12, color=text_color)
             ax6.set_title(f"{self.model_name} Precision-Recall Curve", fontsize=14, fontweight='bold', color=text_color)
-            ax6.legend(loc="lower left", fontsize=9, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax6.legend(loc="lower left", fontsize=9, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
             ax6.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
             ax6.grid(color=grid_color, linestyle='--', linewidth=0.5)
-            ax6.set_facecolor('#1E1E1E')
+            ax6.set_facecolor('white')
 
             ax7 = fig.add_subplot(gs[2, 0])
             try:
@@ -364,7 +364,7 @@ class BaseTrainer:
                 
                 df = pd.DataFrame(data)
                 pivot_df = df.pivot(index='class', columns='metric', values='value')
-                pivot_df.plot(kind='bar', ax=ax7, color=bright_colors[:3], width=0.8, alpha=0.9, edgecolor='white', linewidth=0.5)
+                pivot_df.plot(kind='bar', ax=ax7, color=bright_colors[:3], width=0.8, alpha=0.9, edgecolor='black', linewidth=0.5)
                 
                 for container in ax7.containers:
                     ax7.bar_label(container, fmt='%.2f', padding=3, color=text_color, fontweight='bold', fontsize=9)
@@ -372,17 +372,17 @@ class BaseTrainer:
                 ax7.set_title(f"{self.model_name} Class Performance Metrics", fontsize=14, fontweight='bold', color=text_color)
                 ax7.set_xlabel('Class', fontsize=12, color=text_color)
                 ax7.set_ylabel('Score', fontsize=12, color=text_color)
-                ax7.legend(title='Metrics', fontsize=10, title_fontsize=11, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+                ax7.legend(title='Metrics', fontsize=10, title_fontsize=11, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
                 ax7.tick_params(axis='x', rotation=0, labelsize=10, colors=text_color)
                 ax7.tick_params(axis='y', labelsize=10, colors=text_color)
-                ax7.set_ylim([0, 1.05])  # Standardize y-axis for metrics
+                ax7.set_ylim([0, 1.05])
                 ax7.grid(color=grid_color, linestyle='--', linewidth=0.5, axis='y')
-                ax7.set_facecolor('#1E1E1E')
+                ax7.set_facecolor('white')
                 
             except Exception as e:
                 ax7.text(0.5, 0.5, f"Could not generate report:\n{e}", ha='center', va='center', fontsize=11, color=text_color)
                 ax7.set_title(f"{self.model_name} Class Metrics", fontsize=14, fontweight='bold', color=text_color)
-                ax7.set_facecolor('#1E1E1E')
+                ax7.set_facecolor('white')
 
             ax8 = fig.add_subplot(gs[2, 1])
             pred_counts = np.bincount(self.metrics_data['predictions'], minlength=n_classes)
@@ -392,22 +392,22 @@ class BaseTrainer:
             x = np.arange(len(labels))
             width = 0.35
             
-            rects1 = ax8.bar(x - width/2, true_counts, width, label='True', color=bright_colors[0], alpha=0.9, edgecolor='white', linewidth=0.5)
-            rects2 = ax8.bar(x + width/2, pred_counts, width, label='Predicted', color=bright_colors[1], alpha=0.9, edgecolor='white', linewidth=0.5)
+            rects1 = ax8.bar(x - width/2, true_counts, width, label='True', color=bright_colors[0], alpha=0.9, edgecolor='black', linewidth=0.5)
+            rects2 = ax8.bar(x + width/2, pred_counts, width, label='Predicted', color=bright_colors[1], alpha=0.9, edgecolor='black', linewidth=0.5)
             
             ax8.set_title(f"{self.model_name} Class Distribution", fontsize=14, fontweight='bold', color=text_color)
             ax8.set_xlabel('Class', fontsize=12, color=text_color)
             ax8.set_ylabel('Count', fontsize=12, color=text_color)
             ax8.set_xticks(x)
             ax8.set_xticklabels(labels)
-            ax8.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax8.legend(fontsize=10, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
             ax8.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
             
             ax8.bar_label(rects1, padding=3, color=text_color, fontsize=9)
             ax8.bar_label(rects2, padding=3, color=text_color, fontsize=9)
             
             ax8.grid(color=grid_color, linestyle='--', linewidth=0.5, axis='y')
-            ax8.set_facecolor('#1E1E1E')
+            ax8.set_facecolor('white')
 
             ax9 = fig.add_subplot(gs[2, 2])
             for i, color in zip(range(n_classes), bright_colors):
@@ -424,10 +424,10 @@ class BaseTrainer:
             ax9.set_title(f"{self.model_name} Probability Density", fontsize=14, fontweight='bold', color=text_color)
             ax9.set_xlabel('Probability', fontsize=12, color=text_color)
             ax9.set_ylabel('Density', fontsize=12, color=text_color)
-            ax9.legend(fontsize=10, facecolor='#1E1E1E', edgecolor='#444444', labelcolor=text_color)
+            ax9.legend(fontsize=10, facecolor='white', edgecolor='#cccccc', labelcolor=text_color)
             ax9.tick_params(axis='both', which='major', labelsize=10, colors=text_color)
             ax9.grid(color=grid_color, linestyle='--', linewidth=0.5)
-            ax9.set_facecolor('#1E1E1E')
+            ax9.set_facecolor('white')
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
         fig.suptitle(f"{self.model_name} Training Metrics - Epoch {epoch + 1}", 
