@@ -343,10 +343,10 @@ fn dct2d(gray: &Array2<f32>) -> Array2<f32> {
 
     // DCT on columns (which are now rows in transposed view)
     for i in 0..data_t_fixed.len_of(ndarray::Axis(0)) {
-        let mut col_vec = data_t_fixed
+        let (mut col_vec, _offset) = data_t_fixed
             .index_axis(ndarray::Axis(0), i)
             .to_owned()
-            .into_raw_vec();
+            .into_raw_vec_and_offset();
         dct_h.process_dct2(&mut col_vec);
         // Orthonormal scaling for columns
         let scale = (2.0 * (h as f32).sqrt()).recip();
