@@ -44,6 +44,11 @@ RUN --mount=type=secret,id=dburl \
     . $HOME/.cargo/env && cd backend && cargo build --release -p backend
 
 FROM backend-builder AS frontend-builder
+
+# Install Node.js for Tailwind CSS compilation
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y nodejs
+
 RUN . $HOME/.cargo/env && rustup target add wasm32-unknown-unknown && cargo install trunk
 
 COPY Cargo.toml Cargo.lock ./
@@ -51,6 +56,7 @@ COPY backend ./backend
 COPY frontend ./frontend
 COPY shared ./shared
 
+RUN cd frontend && npm install && npm run build-css-prod
 RUN cd frontend && trunk build --release
 
 FROM debian:bookworm-slim AS final

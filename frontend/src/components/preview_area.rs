@@ -42,8 +42,7 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
             <div class="button-container">
                 <button
                     id="clear-all-btn"
-                    class="analyze-btn"
-                    style="background-color: var(--clear-color);"
+                    class="analyze-btn bg-red-700"
                     onclick={debounce(300, {
                         let link = link.clone();
                         move || link.send_message(Msg::ClearAllFiles)
@@ -62,8 +61,7 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                     { render_analyze_button_content(model) }
                 </button>
                 <button
-                    class="analyze-btn"
-                    style="background-color: var(--primary-color);"
+                    class="analyze-btn bg-primary"
                     onclick={debounce(300, {
                         let link = link.clone();
                         move || link.callback(|_| Msg::AnalyzeAll).emit(())
@@ -103,7 +101,7 @@ fn render_preview_item(ctx: &Context<Model>, model: &Model, file_data: &FileData
                     Msg::RemoveFile(file_id)
                 })}
             >
-                <i class="fa-solid fa-times" style="font-size: 10px;"></i>
+                <i class="fa-solid fa-times text-xs"></i>
             </button>
         </div>
     }
@@ -114,7 +112,7 @@ fn render_selected_image_preview(model: &Model) -> Html {
         Some(_id) if model.preview_loading => html! {
             <div class="loading-preview">
                 <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
-                <p style="margin-left: 10px;">{"Loading preview..."}</p>
+                <p class="ml-2.5">{"Loading preview..."}</p>
             </div>
         },
         Some(id) => {

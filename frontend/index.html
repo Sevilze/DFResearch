@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DFResearch Frontend</title>
-    <link data-trunk rel="css" href="styles.css" />
+    <link data-trunk rel="css" href="dist/styles.css" />
     <link data-trunk rel="copy-dir" href="public" />
   </head>
   <body>
@@ -27,7 +27,7 @@
         id="file-input"
         multiple
         accept="image/*"
-        style="display: none"
+        class="hidden"
       />
       <button id="upload-button">Select Images</button>
 
@@ -41,12 +41,7 @@
           id="actual-image-preview"
           src=""
           alt="Image Preview"
-          style="
-            max-width: 100%;
-            height: auto;
-            display: block;
-            margin-bottom: 10px;
-          "
+          class="max-w-full h-auto block mb-2.5"
         />
         <h2>Previews:</h2>
         <div id="image-previews"></div>

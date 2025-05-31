@@ -67,7 +67,7 @@ fn render_file_input_area(model: &Model, ctx: &Context<Model>, limit_reached: bo
                 id="file-input"
                 multiple=true
                 accept="image/*"
-                style="display: none;"
+                class="hidden"
                 onchange={handle_change}
             />
 

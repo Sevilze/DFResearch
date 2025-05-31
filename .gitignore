@@ -11,4 +11,14 @@ dist
 libtorch
 libtorchgpu
 shell_scripts
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Package lock files (keep package.json but ignore lock files for flexibility)
+package-lock.json
+yarn.lock
 Cargo.lock
