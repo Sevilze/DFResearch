@@ -4,49 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DFResearch Frontend</title>
-    <link data-trunk rel="css" href="dist/styles.css" />
+    <link data-trunk rel="scss" href="src/styles.scss" />
     <link data-trunk rel="copy-dir" href="public" />
   </head>
   <body>
-    <div class="container">
-      <header class="app-header">
-        <h1>Image Upload and Preview</h1>
-        <div class="top-right">
-          <button id="theme-toggle" class="theme-toggle">
-            <img
-              src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f319.svg"
-              alt="Toggle Theme"
-              class="toggle-icon"
-            />
-          </button>
-        </div>
-      </header>
-
-      <input
-        type="file"
-        id="file-input"
-        multiple
-        accept="image/*"
-        class="hidden"
-      />
-      <button id="upload-button">Select Images</button>
-
-      <div id="drop-zone">
-        <p>Or drag & drop images here</p>
-      </div>
-
-      <div id="image-preview-container"></div>
-      <div id="preview-container">
-        <img
-          id="actual-image-preview"
-          src=""
-          alt="Image Preview"
-          class="max-w-full h-auto block mb-2.5"
-        />
-        <h2>Previews:</h2>
-        <div id="image-previews"></div>
-      </div>
-    </div>
     <div id="app"></div>
   </body>
 </html>

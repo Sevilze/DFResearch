@@ -1,3 +1,4 @@
+pub mod auth_button;
 pub mod handlers;
 pub mod header;
 pub mod preview_area;

@@ -12,6 +12,7 @@ gloo-file = "0.3"
 gloo-events = "0.2"
 gloo-net = "0.6"
 gloo-timers = "0.3"
+gloo-storage = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 gloo-console = "0.3"
@@ -46,5 +47,8 @@ web-sys = { version = "0.3.77", features = [
     "Blob",
     "Url",
     "CssStyleDeclaration",
-    "console"
+    "console",
+    "Location",
+    "UrlSearchParams",
+    "History"
 ]}
