@@ -48,6 +48,55 @@ pub struct AuthMiddlewareService<S> {
     jwt_service: Arc<JwtService>,
 }
 
+#[derive(Debug)]
+enum AuthError {
+    NoAuthHeader,
+    InvalidHeaderFormat,
+    NotBearerToken,
+    VerificationFailed(String),
+    InvalidUuidInClaims(String),
+}
+
+impl AuthError {
+    fn log_message(&self, path: &str) -> String {
+        match self {
+            AuthError::NoAuthHeader => format!("No Authorization header found for path: {}", path),
+            AuthError::InvalidHeaderFormat => format!("Invalid Authorization header format (non-UTF-8) for path: {}", path),
+            AuthError::NotBearerToken => format!("Authorization header for path {} doesn't start with 'Bearer '", path),
+            AuthError::VerificationFailed(e) => format!("JWT token verification failed for path {}: {}", path, e),
+            AuthError::InvalidUuidInClaims(sub) => format!("Invalid UUID in JWT claims.sub for path {}: {}", path, sub),
+        }
+    }
+
+    fn client_error_json(&self) -> serde_json::Value {
+        let error_message = match self {
+            AuthError::InvalidUuidInClaims(_) => "Invalid token claims",
+            AuthError::VerificationFailed(_) => "Token verification failed",
+            _ => "Missing or invalid authorization token",
+        };
+        serde_json::json!({"error": error_message})
+    }
+}
+
+/// Helper function to validate the token from the request.
+fn validate_request_token(
+    req: &ServiceRequest,
+    jwt_service: &JwtService,
+) -> Result<Uuid, AuthError> {
+    let auth_header = req.headers().get("Authorization").ok_or(AuthError::NoAuthHeader)?;
+    let auth_str = auth_header.to_str().map_err(|_| AuthError::InvalidHeaderFormat)?;
+    let token = auth_str.strip_prefix("Bearer ").ok_or(AuthError::NotBearerToken)?;
+
+    log::debug!("Found Bearer token, verifying...");
+    let claims = jwt_service
+        .verify_token(token)
+        .map_err(|e| AuthError::VerificationFailed(format!("{:?}", e)))?;
+
+    log::debug!("JWT token verified for user: {}", claims.sub);
+    Uuid::parse_str(&claims.sub)
+        .map_err(|_| AuthError::InvalidUuidInClaims(claims.sub.clone()))
+}
+
 impl<S, B> Service<ServiceRequest> for AuthMiddlewareService<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
@@ -65,66 +114,43 @@ where
         let jwt_service = self.jwt_service.clone();
 
         Box::pin(async move {
-            let path = req.path();
-            if path.starts_with("/static/")
-                || path.starts_with("/dist/")
-                || path.ends_with(".html")
-                || path.ends_with(".css")
-                || path.ends_with(".js")
-                || path.ends_with(".wasm")
-                || path.ends_with(".png")
-                || path.ends_with(".jpg")
-                || path.ends_with(".jpeg")
-                || path.ends_with(".gif")
-                || path.ends_with(".svg")
-                || path.ends_with(".ico")
-                || path == "/"
+            let path_str = req.path().to_string();
+
+            if path_str.starts_with("/static/")
+                || path_str.starts_with("/dist/")
+                || path_str.ends_with(".html")
+                || path_str.ends_with(".css")
+                || path_str.ends_with(".js")
+                || path_str.ends_with(".wasm")
+                || path_str.ends_with(".png")
+                || path_str.ends_with(".jpg")
+                || path_str.ends_with(".jpeg")
+                || path_str.ends_with(".gif")
+                || path_str.ends_with(".svg")
+                || path_str.ends_with(".ico")
+                || path_str == "/"
             {
                 let res = service.call(req).await?;
                 return Ok(res.map_into_left_body());
             }
+            log::debug!("Auth middleware processing path: {}", &path_str);
 
-            // Extract Bearer token from Authorization header
-            let auth_header = req.headers().get("Authorization");
-            log::debug!("Auth middleware processing path: {}", path);
-
-            if let Some(auth_value) = auth_header {
-                if let Ok(auth_str) = auth_value.to_str() {
-                    if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                        log::debug!("Found Bearer token, verifying...");
-                        match jwt_service.verify_token(token) {
-                            Ok(claims) => {
-                                log::debug!("JWT token verified for user: {}", claims.sub);
-                                if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
-                                    req.extensions_mut().insert(user_id);
-                                    let res = service.call(req).await?;
-                                    return Ok(res.map_into_left_body());
-                                } else {
-                                    log::error!("Invalid UUID in JWT claims.sub: {}", claims.sub);
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!("JWT token verification failed: {:?}", e);
-                            }
-                        }
-                    } else {
-                        log::warn!("Authorization header doesn't start with 'Bearer '");
-                    }
-                } else {
-                    log::warn!("Invalid Authorization header format");
+            match validate_request_token(&req, &jwt_service) {
+                Ok(user_id) => {
+                    req.extensions_mut().insert(user_id);
+                    let res = service.call(req).await?;
+                    Ok(res.map_into_left_body())
                 }
-            } else {
-                log::debug!("No Authorization header found for path: {}", path);
+                Err(auth_error) => {
+                    log::warn!("{}", auth_error.log_message(&path_str));
+
+                    let (http_req, _payload) = req.into_parts();
+                    let response = HttpResponse::Unauthorized()
+                        .json(auth_error.client_error_json())
+                        .map_into_right_body();
+                    Ok(ServiceResponse::new(http_req, response))
+                }
             }
-
-            // Return unauthorized response
-            log::warn!("Authentication failed for path: {} - returning 401", path);
-            let (req, _) = req.into_parts();
-            let response = HttpResponse::Unauthorized()
-                .json(serde_json::json!({"error": "Missing or invalid authorization token"}))
-                .map_into_right_body();
-
-            Ok(ServiceResponse::new(req, response))
         })
     }
 }
@@ -135,10 +161,19 @@ impl FromRequest for AuthenticatedUser {
     type Error = actix_web::Error;
     type Future = Ready<Result<Self, Self::Error>>;
 
-    fn from_request(req: &HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+    fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
         match req.extensions().get::<Uuid>() {
             Some(user_id) => ok(AuthenticatedUser(*user_id)),
-            None => ok(AuthenticatedUser(Uuid::nil())),
+            None => {
+                // This case should ideally not be hit for routes protected by this middleware as the middleware would return 401 earlier.
+                // If it's hit, it might indicate an optional authentication or misconfiguration.
+                log::warn!(
+                    "AuthenticatedUser extractor: No Uuid found in request extensions for path: {}. \
+                    This might indicate an issue if authentication was expected.",
+                    req.path()
+                );
+                ok(AuthenticatedUser(Uuid::nil()))
+            }
         }
     }
 }

@@ -104,33 +104,29 @@ async fn handle_inference(
     info!("Processing inference request for user: {}", user_id);
 
     let mut results = Vec::new();
-    let mut images_with_metadata: Vec<(Vec<u8>, String, String)> = Vec::new(); // (data, filename, mime_type)
-    let mut task_ids = Vec::new();
+    let mut images_with_metadata: Vec<(Vec<u8>, String, String)> = Vec::new();
     let mut processing_mode = ProcessingMode::IntermediateFusionEnsemble;
 
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition();
         let field_name = content_disposition
             .as_ref()
-            .unwrap()
-            .get_name()
+            .and_then(|cd| cd.get_name())
             .unwrap_or("image");
 
         match field_name {
             "image" => {
-                // Extract filename first before borrowing field mutably
                 let filename = content_disposition
                     .as_ref()
                     .and_then(|cd| cd.get_filename())
-                    .unwrap_or("uploaded_image")
-                    .to_string();
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "uploaded_image".to_string());
 
                 let mut image_data = Vec::new();
                 while let Some(chunk) = field.next().await {
                     image_data.write_all(&chunk?)?;
                 }
                 if !image_data.is_empty() {
-                    // Determine MIME type from filename or default to JPEG
                     let mime_type = if filename.to_lowercase().ends_with(".png") {
                         "image/png"
                     } else if filename.to_lowercase().ends_with(".webp") {
@@ -141,7 +137,6 @@ async fn handle_inference(
                         "image/jpeg"
                     }
                     .to_string();
-
                     images_with_metadata.push((image_data, filename, mime_type));
                 }
             }
@@ -151,7 +146,7 @@ async fn handle_inference(
                     mode_data.write_all(&chunk?)?;
                 }
                 if let Ok(mode_str) = String::from_utf8(mode_data) {
-                    processing_mode = match mode_str.as_str() {
+                    processing_mode = match mode_str.trim() {
                         "late_fusion" => ProcessingMode::LateFusionEnsemble,
                         _ => ProcessingMode::IntermediateFusionEnsemble,
                     };
@@ -178,16 +173,12 @@ async fn handle_inference(
         processing_mode
     );
 
-    // Process each image with caching
     for (image_data, filename, mime_type) in &images_with_metadata {
         let task_id = Uuid::new_v4();
-        task_ids.push(task_id);
 
-        // Calculate image hash for caching
         let image_hash = S3Service::calculate_image_hash(image_data);
-        info!("Processing image with hash: {}", image_hash);
+        info!("Processing image '{}' with hash: {}", filename, image_hash);
 
-        // Check for cached inference result first
         match cache_service
             .get_cached_inference(user_id, &image_hash, &processing_mode)
             .await
@@ -195,10 +186,7 @@ async fn handle_inference(
             Ok(cached_response) => {
                 info!("Cache hit for image hash: {}", image_hash);
                 results.push(json!({
-                    "task": {
-                        "id": task_id,
-                        "status": "completed"
-                    },
+                    "task": { "id": task_id.to_string(), "status": "completed" },
                     "inference": cached_response,
                     "cached": true
                 }));
@@ -212,55 +200,72 @@ async fn handle_inference(
             }
         }
 
-        // Cache the image first
         match cache_service
             .cache_image(user_id, image_data, filename.clone(), mime_type.clone())
             .await
         {
             Ok(image_cache_entry) => {
-                info!("Image cached successfully: {}", image_cache_entry.s3_key);
+                info!(
+                    "Image '{}' cached successfully: {}",
+                    filename, image_cache_entry.s3_key
+                );
             }
             Err(e) => {
-                warn!("Failed to cache image: {:?}", e);
-                // Continue with inference even if caching fails
+                warn!("Failed to cache image '{}': {:?}", filename, e);
             }
         }
 
-        // Perform inference since no cached result was found
-        let mut model_guard = model.lock().map_err(|e| {
-            error!("Failed to lock model: {:?}", e);
-            actix_web::error::ErrorInternalServerError("Failed to lock model")
-        })?;
+        let model_operation_outcome: Result<(Vec<f32>, bool, f32), String> = {
+            let mut model_guard = model.lock().map_err(|e| {
+                error!("Failed to lock model: {:?}", e);
+                actix_web::error::ErrorInternalServerError(format!(
+                    "Critical error: Failed to lock model: {}",
+                    e
+                ))
+            })?;
 
-        if let Err(e) = model_guard.persistent_load(&processing_mode) {
-            error!(
-                "Failed to load models for mode {:?}: {:?}",
-                processing_mode, e
-            );
-            return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
-                error: format!("Failed to load models for mode {:?}", processing_mode),
-            }));
-        }
+            if let Err(e) = model_guard.persistent_load(&processing_mode) {
+                let error_msg = format!(
+                    "Failed to load models for mode {:?}: {:?}",
+                    processing_mode, e
+                );
+                error!("{}", error_msg);
+                return Ok(
+                    HttpResponse::InternalServerError().json(ErrorResponse { error: error_msg })
+                );
+            }
 
-        match model_guard.inference(image_data, &processing_mode) {
-            Ok(predictions) => {
-                let (is_ai, confidence) = model_guard.calculate_result(&predictions);
-                let response = InferenceResponse {
-                    predictions: predictions.clone(),
+            match model_guard.inference(image_data, &processing_mode) {
+                Ok(predictions_from_model) => {
+                    let (is_ai, confidence) = model_guard.calculate_result(&predictions_from_model);
+                    Ok((predictions_from_model.clone(), is_ai, confidence))
+                }
+                Err(e) => {
+                    let error_msg =
+                        format!("Model inference error for image '{}': {:?}", filename, e);
+                    error!("{}", error_msg);
+                    Err(error_msg)
+                }
+            }
+        };
+
+        match model_operation_outcome {
+            Ok((predictions_cloned, is_ai_val, confidence_val)) => {
+                let inference_result_obj = InferenceResponse {
+                    predictions: predictions_cloned.clone(),
                     class_labels: vec!["AI Generated".into(), "Human Created".into()],
-                    is_ai,
-                    confidence,
+                    is_ai: is_ai_val,
+                    confidence: confidence_val,
                 };
 
-                // Cache the inference result
                 match cache_service
                     .cache_inference_result(
                         user_id,
                         image_hash.clone(),
                         &processing_mode,
-                        &predictions,
-                        is_ai,
-                        confidence,
+                        &predictions_cloned,
+                        is_ai_val,
+                        confidence_val,
                     )
                     .await
                 {
@@ -268,30 +273,23 @@ async fn handle_inference(
                         info!("Inference result cached for image hash: {}", image_hash);
                     }
                     Err(e) => {
-                        warn!("Failed to cache inference result: {:?}", e);
-                        // Continue even if caching fails
+                        warn!(
+                            "Failed to cache inference result for image hash {}: {:?}",
+                            image_hash, e
+                        );
                     }
                 }
 
                 results.push(json!({
-                    "task": {
-                        "id": task_id,
-                        "status": "completed"
-                    },
-                    "inference": response,
+                    "task": { "id": task_id.to_string(), "status": "completed" },
+                    "inference": inference_result_obj,
                     "cached": false
                 }));
             }
-            Err(e) => {
-                let error_msg = format!("Model inference error: {:?}", e);
-                error!("{}", error_msg);
-
+            Err(error_individual_image) => {
                 results.push(json!({
-                    "task": {
-                        "id": task_id,
-                        "status": "error"
-                    },
-                    "error": error_msg
+                    "task": { "id": task_id.to_string(), "status": "error" },
+                    "error": error_individual_image
                 }));
             }
         }
@@ -299,7 +297,7 @@ async fn handle_inference(
 
     info!(
         "Completed processing {} images for user: {}",
-        results.len(),
+        images_with_metadata.len(),
         user_id
     );
     Ok(HttpResponse::Ok().json(json!({ "results": results })))
@@ -312,8 +310,7 @@ async fn handle_inference_public(
     info!("Processing public inference request (no authentication)");
 
     let mut results = Vec::new();
-    let mut images_with_metadata: Vec<(Vec<u8>, String, String)> = Vec::new(); // (data, filename, mime_type)
-    let mut task_ids = Vec::new();
+    let mut images_with_metadata: Vec<(Vec<u8>, String, String)> = Vec::new();
     let mut processing_mode = ProcessingMode::IntermediateFusionEnsemble;
 
     while let Ok(Some(mut field)) = payload.try_next().await {
@@ -371,11 +368,8 @@ async fn handle_inference_public(
     // Process each image without caching
     for (image_data, filename, _mime_type) in &images_with_metadata {
         let task_id = Uuid::new_v4();
-        task_ids.push(task_id);
-
         info!("Processing public image: {}", filename);
 
-        // Perform inference since no cached result was found
         let mut model_guard = model.lock().map_err(|e| {
             error!("Failed to lock model: {:?}", e);
             actix_web::error::ErrorInternalServerError("Failed to lock model")

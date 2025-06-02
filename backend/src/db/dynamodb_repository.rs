@@ -193,14 +193,14 @@ impl DynamoDbRepository {
 
         if let Some(items) = result.items {
             if let Some(item) = items.into_iter().next() {
-                return Ok(self.parse_user_from_item(item)?);
+                return self.parse_user_from_item(item);
             }
         }
         Err(RepositoryError::NotFound)
     }
 
     pub async fn update_user(&self, user: &User) -> Result<(), RepositoryError> {
-        log::info!("🔄 Updating user in DynamoDB: {}", user.email);
+        log::info!("Updating user in DynamoDB: {}", user.email);
 
         let mut key = HashMap::new();
         key.insert("id".to_string(), AttributeValue::S(user.id.to_string()));
@@ -218,6 +218,7 @@ impl DynamoDbRepository {
             );
             log::debug!("Adding cognito_access_token to update");
         }
+
         if let Some(cognito_refresh_token) = &user.cognito_refresh_token {
             update_expression_parts.push("cognito_refresh_token = :cognito_refresh_token");
             expression_attribute_values.insert(
@@ -633,12 +634,12 @@ impl DynamoDbRepository {
         let cognito_access_token = item
             .get("cognito_access_token")
             .and_then(|v| v.as_s().ok())
-            .map(|s| s.clone());
+            .cloned();
 
         let cognito_refresh_token = item
             .get("cognito_refresh_token")
             .and_then(|v| v.as_s().ok())
-            .map(|s| s.clone());
+            .cloned();
 
         // Common fields
         let email = item
@@ -653,10 +654,7 @@ impl DynamoDbRepository {
             .ok_or_else(|| RepositoryError::InvalidData("Invalid name".to_string()))?
             .clone();
 
-        let picture_url = item
-            .get("picture_url")
-            .and_then(|v| v.as_s().ok())
-            .map(|s| s.clone());
+        let picture_url = item.get("picture_url").and_then(|v| v.as_s().ok()).cloned();
 
         let created_at = item
             .get("created_at")

@@ -79,7 +79,7 @@ fn render_file_input_area(model: &Model, ctx: &Context<Model>, limit_reached: bo
                     move || trigger_file_input.emit(())
                 })}
             >
-                <i class="fa-solid fa-upload"></i> {" Select Images"}
+                <i class="fa-solid fa-upload"></i> {"Select Images"}
             </button>
 
             <div

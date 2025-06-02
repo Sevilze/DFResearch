@@ -68,9 +68,9 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
                 let image_hash = image_hash.clone();
                 spawn_local(async move {
                     if let Err(e) = delete_cached_image(&image_hash).await {
-                        log::error!("❌ Failed to delete cached image {}: {:?}", image_hash, e);
+                        log::error!("Failed to delete cached image {}: {:?}", image_hash, e);
                     } else {
-                        log::info!("✅ Successfully deleted cached image: {}", image_hash);
+                        log::info!("Successfully deleted cached image: {}", image_hash);
                     }
                 });
             }
@@ -133,15 +133,14 @@ pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>, mode: 
             }
         };
 
-        // Get auth token from localStorage
         let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
 
         // Determine which endpoint to use based on authentication status
         let (endpoint, use_auth) = if auth_token.is_some() {
-            log::info!("🔐 User authenticated - using authenticated inference endpoint with caching");
+            log::info!("User authenticated - using authenticated inference endpoint with caching");
             ("/api/inference", true)
         } else {
-            log::info!("🌐 User not authenticated - using public inference endpoint (no caching)");
+            log::info!("User not authenticated - using public inference endpoint (no caching)");
             ("/public/inference", false)
         };
 
@@ -151,7 +150,8 @@ pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>, mode: 
         if use_auth {
             if let Some(token) = auth_token {
                 log::info!("Adding Authorization header to inference request");
-                request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
+                request_builder =
+                    request_builder.header("Authorization", &format!("Bearer {}", token));
             }
         }
 
@@ -196,8 +196,6 @@ pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>, mode: 
             }
         };
 
-        let mut has_error = false;
-
         for (file_data, result_value) in files.iter().zip(results_array) {
             let task_status = result_value
                 .get("task")
@@ -205,41 +203,29 @@ pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>, mode: 
                 .and_then(|status| status.as_str());
 
             if task_status == Some("completed") {
-                // Process successful inference result
                 if let Some(inference) = result_value.get("inference") {
                     match serde_json::from_value::<InferenceResponse>(inference.clone()) {
                         Ok(results) => {
-                            log::info!("✅ Inference result received for file {}", file_data.id);
+                            log::info!("Inference result received for file {}", file_data.id);
                             link.send_message(Msg::InferenceResult(file_data.id, results));
-                        },
+                        }
                         Err(e) => {
-                            has_error = true;
                             send_error(format!("Failed to parse inference: {}", e));
                         }
                     }
                 } else {
-                    has_error = true;
                     send_error("No inference data in completed task".to_string());
                 }
             } else if task_status == Some("error") {
                 // Handle task error
                 if let Some(error) = result_value.get("error") {
-                    has_error = true;
                     send_error(format!("Task error: {}", error));
                 } else {
-                    has_error = true;
                     send_error("Task failed with unknown error".to_string());
                 }
             } else {
-                // Handle unexpected task status
-                has_error = true;
                 send_error(format!("Unexpected task status: {:?}", task_status));
             }
-        }
-
-        // No need to set task map since we're not polling anymore
-        if !has_error {
-            log::info!("🎉 All inference results processed successfully");
         }
     });
 }
@@ -515,16 +501,13 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
     let link = ctx.link().clone();
 
     wasm_bindgen_futures::spawn_local(async move {
-        // Get auth token from localStorage
         let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-
         if auth_token.is_none() {
             log::info!("🔍 No auth token found, skipping session restoration");
             return;
         }
 
-        log::info!("🔄 Fetching cached session data...");
-
+        log::info!("Fetching cached session data...");
         let mut request_builder = Request::get("/api/cache/history");
 
         // Add authorization header
@@ -536,11 +519,11 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
             Ok(resp) if resp.ok() => resp,
             Ok(resp) => {
                 let status = resp.status();
-                log::warn!("⚠️ Failed to fetch session data: {}", status);
+                log::warn!("Failed to fetch session data: {}", status);
                 return;
             }
             Err(e) => {
-                log::warn!("⚠️ Network error fetching session data: {}", e);
+                log::warn!("Network error fetching session data: {}", e);
                 return;
             }
         };
@@ -548,25 +531,33 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
         let session_data: Value = match response.json().await {
             Ok(data) => data,
             Err(e) => {
-                log::error!("❌ Failed to parse session data: {}", e);
+                log::error!("Failed to parse session data: {}", e);
                 return;
             }
         };
 
-        log::info!("✅ Session data received, restoring...");
+        log::info!("Session data received, restoring...");
 
-        // Process images
         if let Some(images_obj) = session_data.get("images").and_then(|v| v.as_object()) {
-            log::info!("🖼️ Processing {} cached images", images_obj.len());
+            log::info!("Processing {} cached images", images_obj.len());
             for (file_id_str, image_data) in images_obj {
                 if let Ok(file_id) = file_id_str.parse::<u64>() {
-                    if let Some(preview_url) = image_data.get("preview_url").and_then(|v| v.as_str()) {
+                    if let Some(preview_url) =
+                        image_data.get("preview_url").and_then(|v| v.as_str())
+                    {
                         // Create a mock file for the cached image
-                        let file_name = image_data.get("name").and_then(|v| v.as_str()).unwrap_or("cached_image");
-                        let file_size = image_data.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let file_name = image_data
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("cached_image");
+                        let file_size =
+                            image_data.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
                         // Create FileData and then set the preview URL
-                        let image_hash = image_data.get("image_hash").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let image_hash = image_data
+                            .get("image_hash")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                         let file_data = FileData {
                             id: file_id,
                             file: create_mock_file(file_name, file_size),
@@ -575,22 +566,25 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
                             is_cached: true,
                         };
 
-                        // Restore the file first
-                        log::info!("📁 Restoring cached file: {} ({})", file_id, file_name);
+                        log::info!("Restoring cached file: {} ({})", file_id, file_name);
                         link.send_message(Msg::RestoreCachedFile(file_id, file_data.clone()));
 
-                        // Then fetch and set the preview URL
+                        // Fetch and set the preview URL
                         let link_clone = link.clone();
                         let preview_url_owned = preview_url.to_string();
                         spawn_local(async move {
                             // Create a blob URL from the cached image endpoint
                             match fetch_cached_image_as_blob(&preview_url_owned).await {
                                 Ok(blob_url) => {
-                                    log::info!("✅ Created blob URL for cached image: {}", file_id);
+                                    log::info!("Created blob URL for cached image: {}", file_id);
                                     link_clone.send_message(Msg::AddPreview(file_id, blob_url));
                                 }
                                 Err(e) => {
-                                    log::error!("❌ Failed to create blob URL for cached image {}: {:?}", file_id, e);
+                                    log::error!(
+                                        "Failed to create blob URL for cached image {}: {:?}",
+                                        file_id,
+                                        e
+                                    );
                                 }
                             }
                         });
@@ -599,11 +593,12 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
             }
         }
 
-        // Process results
         if let Some(results_obj) = session_data.get("results").and_then(|v| v.as_object()) {
             for (file_id_str, result_data) in results_obj {
                 if let Ok(file_id) = file_id_str.parse::<u64>() {
-                    if let Ok(inference_response) = serde_json::from_value::<InferenceResponse>(result_data.clone()) {
+                    if let Ok(inference_response) =
+                        serde_json::from_value::<InferenceResponse>(result_data.clone())
+                    {
                         link.send_message(Msg::InferenceResult(file_id, inference_response));
                     }
                 }
@@ -618,77 +613,63 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
 fn create_mock_file(name: &str, size: u32) -> GlooFile {
     // Create a minimal blob to represent the cached file
     let array = js_sys::Uint8Array::new_with_length(size);
-    let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array))
-        .unwrap();
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array)).unwrap();
 
-    // Create a File from the blob
     let file_options = web_sys::FilePropertyBag::new();
-    file_options.set_type("image/jpeg"); // Default to JPEG
+    file_options.set_type("image/jpeg");
     let file = web_sys::File::new_with_blob_sequence_and_options(
         &js_sys::Array::of1(&blob),
         name,
         &file_options,
-    ).unwrap();
+    )
+    .unwrap();
 
     GlooFile::from(file)
 }
 
 // Helper function to fetch cached image and create a blob URL
-async fn fetch_cached_image_as_blob(preview_url: &str) -> Result<ObjectUrl, Box<dyn std::error::Error>> {
-    // Get auth token from localStorage
+async fn fetch_cached_image_as_blob(
+    preview_url: &str,
+) -> Result<ObjectUrl, Box<dyn std::error::Error>> {
     let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-
     if auth_token.is_none() {
         return Err("No auth token available".into());
     }
 
     let mut request_builder = Request::get(preview_url);
-
-    // Add authorization header
     if let Some(token) = auth_token {
         request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
     }
 
     let response = request_builder.send().await?;
-
     if !response.ok() {
         return Err(format!("Failed to fetch image: {}", response.status()).into());
     }
 
-    // Get the response as bytes
     let bytes = response.binary().await?;
-
-    // Create a blob from the bytes
     let uint8_array = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
     uint8_array.copy_from(&bytes);
 
     let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&uint8_array))
         .map_err(|e| format!("Failed to create blob: {:?}", e))?;
 
-    // Create an ObjectUrl from the blob
     let object_url = ObjectUrl::from(blob);
-
     Ok(object_url)
 }
 
 // Helper function to delete a cached image
 async fn delete_cached_image(image_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Get auth token from localStorage
     let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-
     if auth_token.is_none() {
         return Err("No auth token available".into());
     }
 
     let mut request_builder = Request::delete(&format!("/api/cache/image/{}", image_hash));
-
-    // Add authorization header
     if let Some(token) = auth_token {
         request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
     }
 
     let response = request_builder.send().await?;
-
     if !response.ok() {
         return Err(format!("Failed to delete cached image: {}", response.status()).into());
     }
@@ -698,22 +679,17 @@ async fn delete_cached_image(image_hash: &str) -> Result<(), Box<dyn std::error:
 
 // Helper function to clear all cached data
 async fn clear_user_cache() -> Result<(), Box<dyn std::error::Error>> {
-    // Get auth token from localStorage
     let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-
     if auth_token.is_none() {
         return Err("No auth token available".into());
     }
 
     let mut request_builder = Request::delete("/api/cache/clear");
-
-    // Add authorization header
     if let Some(token) = auth_token {
         request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
     }
 
     let response = request_builder.send().await?;
-
     if !response.ok() {
         return Err(format!("Failed to clear user cache: {}", response.status()).into());
     }

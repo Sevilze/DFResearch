@@ -65,7 +65,7 @@ pub fn render_results(model: &Model) -> Html {
                 </div>
             }
         } else {
-            html! { <p>{"No analysis result available for the selected image."}</p> }
+            html! { <p class="no-results-message">{"No analysis result available for the selected image."}</p> }
         }
     } else {
         html! {}
