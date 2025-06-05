@@ -4,6 +4,7 @@
 !backend/
 !frontend/
 !shared
+!config/
 !Cargo.toml
 !Cargo.lock
 !docker-compose.yml

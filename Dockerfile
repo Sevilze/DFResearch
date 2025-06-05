@@ -39,9 +39,7 @@ COPY shared ./shared
 COPY pyproject/dfresearch /usr/src/app/pyproject/dfresearch
 COPY pyproject/models /usr/src/app/pyproject/models
 
-RUN --mount=type=secret,id=dburl \
-    export DATABASE_URL=$(cat /run/secrets/dburl) && \
-    . $HOME/.cargo/env && cd backend && cargo build --release -p backend
+RUN  . $HOME/.cargo/env && cd backend && cargo build --release -p backend
 
 FROM backend-builder AS frontend-builder
 
@@ -56,7 +54,7 @@ COPY backend ./backend
 COPY frontend ./frontend
 COPY shared ./shared
 
-RUN cd frontend && npm install && npm run build-css-prod
+RUN cd frontend && npm install && npm run generate-favicon && npm run build-css-prod
 RUN cd frontend && trunk build --release
 
 FROM debian:bookworm-slim AS final
@@ -85,10 +83,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     zlib1g
 
-RUN curl https://pkg.cloudflareclient.com/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list && \
-    apt-get update && apt-get install -y cloudflare-warp && \
-    rm -rf /var/lib/apt/lists/*
 
 COPY libtorch /opt/libtorch
 COPY Cargo.toml Cargo.lock /usr/src/app/
@@ -98,6 +92,7 @@ COPY --from=backend-builder /usr/src/app/frontend/ ./frontend
 COPY --from=backend-builder /usr/src/app/backend ./backend
 COPY --from=backend-builder /usr/src/app/pyproject/models /usr/src/app/pyproject/models
 COPY --from=backend-builder /usr/src/app/pyproject/dfresearch /usr/src/app/pyproject/dfresearch
+COPY config /usr/src/app/config
 
 EXPOSE 8081
 CMD ["/usr/local/bin/backend"]
