@@ -1,0 +1,102 @@
+name: Build and Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  REPOSITORY: dfresearchimage
+  REGION: asia-southeast2
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILDKIT: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load environment variables from .env
+        id: dotenv
+        run: |
+          echo "LIBTORCH=/opt/libtorch" >> $GITHUB_ENV
+          echo "LIBTORCH_LIB=/opt/libtorch" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/opt/libtorch/lib" >> $GITHUB_ENV
+          echo "CXXFLAGS=-std=c++17" >> $GITHUB_ENV
+          echo "CARGO_JOBS=4" >> $GITHUB_ENV
+
+      - name: Google Auth
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker to use gcloud as a credential helper
+        run: |
+          gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --build-arg LIBTORCH="$LIBTORCH" \
+            --build-arg LIBTORCH_LIB="$LIBTORCH_LIB" \
+            --build-arg LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
+            --build-arg CXXFLAGS="$CXXFLAGS" \
+            --build-arg CARGO_JOBS="$CARGO_JOBS" \
+            --cache-from=sevilze/dfresearch:latest \
+            --network=host \
+            --tag dfresearch:latest .
+
+      - name: Tag and Push to Artifact Registry
+        run: |
+          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:latest
+          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:$GITHUB_SHA
+          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:latest
+          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:$GITHUB_SHA
+
+      - name: Deploy to Cloud Run
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          gcloud run deploy ${{ secrets.SERVICE }} \
+            --image $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:$GITHUB_SHA \
+            --platform managed \
+            --region $REGION \
+            --allow-unauthenticated \
+            --set-env-vars="LIBTORCH=/opt/libtorch,LIBTORCH_LIB=/opt/libtorch,LD_LIBRARY_PATH=/opt/libtorch/lib,CXXFLAGS=-std=c++17,CARGO_JOBS=4,RUST_LOG=info" \
+            --set-env-vars="AWS_REGION=${{ secrets.AWS_REGION }}" \
+            --set-env-vars="AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --set-env-vars="AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --set-env-vars="DYNAMODB_USERS_TABLE=${{ secrets.DYNAMODB_USERS_TABLE }}" \
+            --set-env-vars="DYNAMODB_IMAGES_TABLE=${{ secrets.DYNAMODB_IMAGES_TABLE }}" \
+            --set-env-vars="DYNAMODB_INFERENCE_TABLE=${{ secrets.DYNAMODB_INFERENCE_TABLE }}" \
+            --set-env-vars="S3_BUCKET_NAME=${{ secrets.S3_BUCKET_NAME }}" \
+            --set-env-vars="BASE_URL=${{ secrets.BASE_URL }}" \
+            --set-env-vars="COGNITO_USER_POOL_ID=${{ secrets.COGNITO_USER_POOL_ID }}" \
+            --set-env-vars="COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}" \
+            --set-env-vars="COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}" \
+            --set-env-vars="COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}" \
+            --set-env-vars="COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}" \
+            --set-env-vars="JWT_SECRET=${{ secrets.JWT_SECRET }}" \
+            --memory 2Gi \
+            --cpu 2 \
+            --timeout 300 \
+            --max-instances 3 \
+            --port 8081
+
+      - name: Show deployment URL
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "Deployment completed."
+          gcloud run services describe ${{ secrets.SERVICE }} --region $REGION --format 'value(status.url)'
