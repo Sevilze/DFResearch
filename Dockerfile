@@ -1,3 +1,6 @@
+ARG MODELS_IMAGE=scratch
+FROM ${MODELS_IMAGE} AS models
+
 FROM rust:1.87-bookworm AS builder
 WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -83,13 +86,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     zlib1g
 
+
 COPY libtorch /opt/libtorch
 COPY Cargo.toml Cargo.lock /usr/src/app/
 COPY --from=frontend-builder /usr/src/app/frontend/ ./frontend
 COPY --from=builder /usr/src/app/target/release/backend /usr/local/bin/backend
 COPY --from=builder /usr/src/app/frontend/ ./frontend
 COPY --from=builder /usr/src/app/backend ./backend
-COPY --from=models:latest /models/ /usr/src/app/pyproject/models/
+COPY --from=models /models/ /usr/src/app/pyproject/models/
 COPY config /usr/src/app/config
 
 EXPOSE 8081

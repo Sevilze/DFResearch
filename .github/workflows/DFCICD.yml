@@ -11,6 +11,7 @@ on:
 env:
   REGION: asia-southeast2
   IMAGE_NAME: asia-southeast2-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch
+  MODELS_IMAGE_NAME: asia-southeast2-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest
   LIBTORCH_VERSION: "2.7.0"
 
 jobs:
@@ -75,6 +76,7 @@ jobs:
             LD_LIBRARY_PATH=/opt/libtorch/lib
             CXXFLAGS=-std=c++17
             CARGO_JOBS=$(nproc)
+            MODELS_IMAGE=${{ env.MODELS_IMAGE_NAME }}
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
