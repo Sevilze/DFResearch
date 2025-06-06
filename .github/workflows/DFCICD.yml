@@ -43,6 +43,9 @@ jobs:
           workload_identity_provider: 'projects/${{ secrets.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ secrets.WORKLOAD_IDENTITY_POOL }}/providers/github-provider'
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
 
+      - name: Credentials Login
+        run: gcloud auth login --cred-file="${{ steps.auth.outputs.credentials_file_path }}"
+
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
