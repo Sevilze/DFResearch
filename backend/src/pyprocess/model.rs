@@ -152,6 +152,10 @@ impl Model {
 
     fn get_model_path(relative_path: &str) -> Result<String, InferenceError> {
         let production_path = format!("/usr/src/app/pyproject/models/{}", relative_path);
+        if std::path::Path::new(&production_path).exists() {
+            log::info!("Found model at: {}", production_path);
+            return Ok(production_path);
+        }
 
         if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
             let dev_path = format!("{}/../pyproject/models/{}", manifest_dir, relative_path);
