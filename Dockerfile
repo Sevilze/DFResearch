@@ -1,6 +1,12 @@
 ARG MODELS_IMAGE=scratch
 FROM ${MODELS_IMAGE} AS models
 
+FROM rust:1.87-bookworm AS planner
+WORKDIR /usr/src/app
+RUN cargo install cargo-chef
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
 FROM rust:1.87-bookworm AS builder
 WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,17 +37,11 @@ ENV LIBTORCH=${LIBTORCH} \
     CXXFLAGS=${CXXFLAGS} \
     CARGO_JOBS=${CARGO_JOBS}
 
-COPY Cargo.toml Cargo.lock ./
-COPY backend/Cargo.toml ./backend/
-COPY frontend/Cargo.toml ./frontend/
-COPY shared/Cargo.toml ./shared/
-RUN cargo chef prepare --recipe-path recipe.json
+COPY --from=planner /usr/src/app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY libtorch /opt/libtorch
-COPY backend ./backend
-COPY frontend ./frontend
-COPY shared ./shared
+COPY . .
 RUN cd backend && cargo build --release --locked -p backend
 
 
@@ -85,7 +85,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     libstdc++6 \
     zlib1g
-
 
 COPY libtorch /opt/libtorch
 COPY Cargo.toml Cargo.lock /usr/src/app/
