@@ -35,6 +35,8 @@ pub struct Model {
 
     pub processing_mode: ProcessingMode,
     pub auth_token: Option<String>,
+    pub completed_requests: usize,
+    pub batch_processing: bool,
 }
 
 #[derive(Clone)]
@@ -67,6 +69,8 @@ pub enum Msg {
     ResetLoadingState,
     SetFutureRequests(usize),
     SetAuthToken(Option<String>),
+    IncrementCompletedRequests,
+    StartBatchProcessing(usize),
 }
 
 impl Model {
@@ -104,7 +108,7 @@ impl Model {
         let token = url_params.get("token");
 
         if let Some(ref token_str) = token {
-            log::info!("🎫 Found token in URL (length: {})", token_str.len());
+            log::info!("Found token in URL (length: {})", token_str.len());
 
             match LocalStorage::set("auth_token", token_str) {
                 Ok(_) => log::info!("Token stored in localStorage successfully"),
@@ -127,7 +131,7 @@ impl Model {
             // Update component state with new token
             ctx.link().send_message(Msg::SetAuthToken(token.clone()));
         } else {
-            log::info!("🔍 No token parameter found in URL");
+            log::info!("No token parameter found in URL");
 
             let stored_token: Option<String> = LocalStorage::get("auth_token").ok();
             if stored_token.is_some() {
@@ -161,6 +165,8 @@ impl Component for Model {
 
             processing_mode: ProcessingMode::IntermediateFusionEnsemble,
             auth_token: None,
+            completed_requests: 0,
+            batch_processing: false,
         };
 
         let link = ctx.link().clone();
@@ -225,10 +231,26 @@ impl Component for Model {
                 self.auth_token = token;
 
                 if now_has_token && (had_no_token || self.files.is_empty()) {
-                    log::info!("🔄 Auth token set, triggering session restoration");
+                    log::info!("Auth token set, triggering session restoration");
                     crate::components::handlers::fetch_and_restore_session(ctx);
                 }
 
+                true
+            }
+            Msg::IncrementCompletedRequests => {
+                self.completed_requests += 1;
+                if self.completed_requests >= self.future_requests {
+                    self.loading = false;
+                    self.batch_processing = false;
+                    self.completed_requests = 0;
+                }
+                true
+            }
+            Msg::StartBatchProcessing(total) => {
+                self.batch_processing = true;
+                self.completed_requests = 0;
+                self.future_requests = total;
+                self.loading = true;
                 true
             }
         }

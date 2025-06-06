@@ -4,19 +4,42 @@ use crate::pyprocess::model::Model;
 use crate::storage::s3_service::S3Service;
 use actix_files::Files;
 use actix_multipart::Multipart;
-use actix_web::{web, Error, HttpResponse};
-use futures::{StreamExt, TryStreamExt};
+use actix_web::{http::header, web, Error, HttpResponse};
+use futures::{stream, StreamExt, TryStreamExt};
 use log::{error, info, warn};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use shared::{InferenceResponse, ProcessingMode};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Debug, Clone)]
+struct InferenceContext {
+    user_id: Option<Uuid>,
+    use_cache: bool,
+}
+
+impl InferenceContext {
+    fn authenticated(user_id: Uuid) -> Self {
+        Self {
+            user_id: Some(user_id),
+            use_cache: true,
+        }
+    }
+
+    fn public() -> Self {
+        Self {
+            user_id: None,
+            use_cache: false,
+        }
+    }
 }
 
 pub fn configure_routes(
@@ -25,13 +48,21 @@ pub fn configure_routes(
     auth_middleware: AuthMiddleware,
 ) {
     cfg
-        // Public API endpoints (no authentication required)
-        .service(web::scope("/public").route("/inference", web::post().to(handle_inference_public)))
-        // Protected API endpoints (authentication required)
+        // Favicon route - handle favicon requests explicitly
+        .route("/favicon.ico", web::get().to(handle_favicon))
+        // Public API endpoints (no authentication required) - now with streaming
+        .service(
+            web::scope("/public")
+                .route("/inference", web::post().to(handle_inference_public_stream)),
+        )
+        // Protected API endpoints (authentication required) - unified streaming
         .service(
             web::scope("/api")
                 .wrap(auth_middleware.clone())
-                .route("/inference", web::post().to(handle_inference))
+                .route(
+                    "/inference",
+                    web::post().to(handle_inference_authenticated_stream),
+                )
                 .route("/cache/history", web::get().to(handle_cache_history))
                 .route(
                     "/cache/image/{image_hash}",
@@ -83,6 +114,28 @@ pub fn configure_routes(
         );
 }
 
+async fn handle_favicon() -> Result<actix_files::NamedFile, actix_web::Error> {
+    let frontend_dir = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        format!("{}/../frontend/dist", manifest_dir)
+    } else {
+        "/usr/src/app/frontend/dist".to_string()
+    };
+
+    let favicon_path = format!("{}/favicon.ico", frontend_dir);
+
+    if std::path::Path::new(&favicon_path).exists() {
+        match actix_files::NamedFile::open(&favicon_path) {
+            Ok(file) => return Ok(file),
+            Err(e) => {
+                warn!("Failed to serve favicon.ico: {:?}", e);
+            }
+        }
+    }
+
+    warn!("Favicon not found at {}", favicon_path);
+    Err(actix_web::error::ErrorNotFound("Favicon not found"))
+}
+
 // Handler for SPA routing - serves index.html for all unmatched routes
 async fn spa_handler() -> Result<actix_files::NamedFile, actix_web::Error> {
     let frontend_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
@@ -94,20 +147,15 @@ async fn spa_handler() -> Result<actix_files::NamedFile, actix_web::Error> {
     })
 }
 
-async fn handle_inference(
-    model: web::Data<Arc<Mutex<Model>>>,
+async fn parse_multipart_payload(
     mut payload: Multipart,
-    cache_service: web::Data<CacheService>,
-    user: AuthenticatedUser,
-) -> Result<HttpResponse, Error> {
-    let user_id = user.0;
-    info!("Processing inference request for user: {}", user_id);
-
-    let mut results = Vec::new();
-    let mut images_with_metadata: Vec<(Vec<u8>, String, String)> = Vec::new();
+) -> Result<(Vec<(Vec<u8>, String, String, u64)>, ProcessingMode), Error> {
+    let mut images_with_metadata = Vec::new();
     let mut processing_mode = ProcessingMode::IntermediateFusionEnsemble;
+    let mut file_counter = 1u64;
 
     while let Ok(Some(mut field)) = payload.try_next().await {
+        let field_start = std::time::Instant::now();
         let content_disposition = field.content_disposition();
         let field_name = content_disposition
             .as_ref()
@@ -115,6 +163,19 @@ async fn handle_inference(
             .unwrap_or("image");
 
         match field_name {
+            "mode" => {
+                let mut mode_data = Vec::new();
+                while let Some(chunk) = field.next().await {
+                    mode_data.write_all(&chunk?)?;
+                }
+                if let Ok(mode_str) = String::from_utf8(mode_data) {
+                    processing_mode = match mode_str.trim() {
+                        "late_fusion" => ProcessingMode::LateFusionEnsemble,
+                        _ => ProcessingMode::IntermediateFusionEnsemble,
+                    };
+                    info!("Processing mode set to: {:?}", processing_mode);
+                }
+            }
             "image" => {
                 let filename = content_disposition
                     .as_ref()
@@ -123,9 +184,12 @@ async fn handle_inference(
                     .unwrap_or_else(|| "uploaded_image".to_string());
 
                 let mut image_data = Vec::new();
+                let mut chunk_count = 0;
                 while let Some(chunk) = field.next().await {
                     image_data.write_all(&chunk?)?;
+                    chunk_count += 1;
                 }
+
                 if !image_data.is_empty() {
                     let mime_type = if filename.to_lowercase().ends_with(".png") {
                         "image/png"
@@ -137,21 +201,9 @@ async fn handle_inference(
                         "image/jpeg"
                     }
                     .to_string();
-                    images_with_metadata.push((image_data, filename, mime_type));
-                }
-            }
-            "mode" => {
-                let mut mode_data = Vec::new();
-                while let Some(chunk) = field.next().await {
-                    mode_data.write_all(&chunk?)?;
-                }
-                if let Ok(mode_str) = String::from_utf8(mode_data) {
-                    processing_mode = match mode_str.trim() {
-                        "late_fusion" => ProcessingMode::LateFusionEnsemble,
-                        _ => ProcessingMode::IntermediateFusionEnsemble,
-                    };
-                } else {
-                    error!("Failed to parse processing mode string");
+
+                    images_with_metadata.push((image_data, filename, mime_type, file_counter));
+                    file_counter += 1;
                 }
             }
             _ => {
@@ -160,267 +212,345 @@ async fn handle_inference(
         }
     }
 
+    Ok((images_with_metadata, processing_mode))
+}
+
+async fn handle_inference_streaming(
+    model: web::Data<Arc<Mutex<Model>>>,
+    payload: Multipart,
+    cache_service: Option<web::Data<CacheService>>,
+    context: InferenceContext,
+) -> Result<HttpResponse, Error> {
+    let request_start = std::time::Instant::now();
+    let context_desc = if context.use_cache {
+        format!("authenticated user: {:?}", context.user_id)
+    } else {
+        "public (no caching)".to_string()
+    };
+    info!(
+        "Processing streaming inference request for {} at {:?}",
+        context_desc, request_start
+    );
+
+    let (images_with_metadata, processing_mode) = parse_multipart_payload(payload).await?;
+
     if images_with_metadata.is_empty() {
-        error!("No image data received in inference request");
         return Ok(HttpResponse::BadRequest().json(ErrorResponse {
             error: "No image data received.".to_string(),
         }));
     }
 
     info!(
-        "Processing {} images with mode: {:?}",
+        "Processing {} images concurrently with streaming mode: {:?} (multipart parsing took {:?}ms)",
         images_with_metadata.len(),
-        processing_mode
+        processing_mode,
+        request_start.elapsed().as_millis()
     );
 
-    for (image_data, filename, mime_type) in &images_with_metadata {
-        let task_id = Uuid::new_v4();
+    let (tx, rx) = mpsc::unbounded_channel::<String>();
 
-        let image_hash = S3Service::calculate_image_hash(image_data);
-        info!("Processing image '{}' with hash: {}", filename, image_hash);
+    tokio::spawn(async move {
+        let spawn_start = std::time::Instant::now();
+        info!("Spawning concurrent processing tasks at {:?}", spawn_start);
 
-        match cache_service
-            .get_cached_inference(user_id, &image_hash, &processing_mode)
-            .await
-        {
-            Ok(cached_response) => {
-                info!("Cache hit for image hash: {}", image_hash);
-                results.push(json!({
-                    "task": { "id": task_id.to_string(), "status": "completed" },
-                    "inference": cached_response,
-                    "cached": true
-                }));
-                continue;
-            }
-            Err(_) => {
-                info!(
-                    "Cache miss for image hash: {}, proceeding with inference",
-                    image_hash
-                );
+        let mut task_handles = Vec::new();
+
+        for (image_data, filename, mime_type, file_id) in images_with_metadata {
+            let filename_clone = filename.clone();
+
+            let model_clone = model.clone();
+            let cache_service_clone = cache_service.clone();
+            let context_clone = context.clone();
+            let processing_mode_clone = processing_mode.clone();
+            let tx_clone = tx.clone();
+            let spawn_start_clone = spawn_start;
+
+            // Spawn each task as a separate tokio task for concurrency
+            let handle = tokio::spawn(async move {
+                let task_id = Uuid::new_v4();
+                let image_hash = S3Service::calculate_image_hash(&image_data);
+
+                let result_json = if context_clone.use_cache && cache_service_clone.is_some() {
+                    let cache_service = cache_service_clone.as_ref().unwrap();
+                    let user_id = context_clone.user_id.unwrap();
+
+                    match cache_service
+                        .get_cached_inference(user_id, &image_hash, &processing_mode_clone)
+                        .await
+                    {
+                        Ok(cached_response) => {
+                            info!("Cache hit for file_id: {}", file_id);
+                            json!({
+                                "file_id": file_id,
+                                "task": { "id": task_id.to_string(), "status": "completed" },
+                                "inference": cached_response,
+                                "cached": true
+                            })
+                        }
+                        Err(_) => {
+                            if let Err(e) = cache_service
+                                .cache_image(
+                                    user_id,
+                                    &image_data,
+                                    filename.clone(),
+                                    mime_type.clone(),
+                                )
+                                .await
+                            {
+                                warn!("Failed to cache image '{}': {:?}", filename, e);
+                            }
+                            let params = ProcessImageParams::new(
+                                &model_clone,
+                                &image_data,
+                                &filename,
+                                &image_hash,
+                                &processing_mode_clone,
+                                file_id,
+                                task_id,
+                                &context_clone,
+                                cache_service_clone.as_ref(),
+                            );
+                            process_image_inference(params).await
+                        }
+                    }
+                } else {
+                    let params = ProcessImageParams::new(
+                        &model_clone,
+                        &image_data,
+                        &filename,
+                        &image_hash,
+                        &processing_mode_clone,
+                        file_id,
+                        task_id,
+                        &context_clone,
+                        None,
+                    );
+                    process_image_inference(params).await
+                };
+
+                // Send result immediately when this task completes
+                let sse_data = format!("data: {}\n\n", result_json);
+                if let Err(e) = tx_clone.send(sse_data) {
+                    error!("Failed to send SSE data for file_id {}: {:?}", file_id, e);
+                } else {
+                    info!(
+                        "Sent result for file_id: {} at {:?}ms from spawn",
+                        file_id,
+                        spawn_start_clone.elapsed().as_millis()
+                    );
+                }
+            });
+
+            task_handles.push(handle);
+
+            info!(
+                "Spawned task for image '{}' (file_id: {}) at {:?}ms from spawn",
+                filename_clone,
+                file_id,
+                spawn_start.elapsed().as_millis()
+            );
+        }
+
+        for handle in task_handles {
+            if let Err(e) = handle.await {
+                error!("Task failed: {:?}", e);
             }
         }
 
-        match cache_service
-            .cache_image(user_id, image_data, filename.clone(), mime_type.clone())
+        if let Err(e) = tx.send("data: {\"type\": \"complete\"}\n\n".to_string()) {
+            error!("Failed to send completion signal: {:?}", e);
+        } else {
+            info!("Sent completion signal after all concurrent tasks finished.");
+        }
+    });
+
+    let stream = stream::unfold(rx, |mut rx| async move {
+        rx.recv()
             .await
-        {
-            Ok(image_cache_entry) => {
-                info!(
-                    "Image '{}' cached successfully: {}",
-                    filename, image_cache_entry.s3_key
-                );
-            }
+            .map(|data| (Ok::<_, Error>(web::Bytes::from(data)), rx))
+    });
+
+    Ok(HttpResponse::Ok()
+        .insert_header((header::CONTENT_TYPE, "text/event-stream"))
+        .insert_header((header::CACHE_CONTROL, "no-cache"))
+        .insert_header((header::CONNECTION, "keep-alive"))
+        .streaming(stream))
+}
+
+struct ProcessImageParams<'a> {
+    model: &'a web::Data<Arc<Mutex<Model>>>,
+    image_data: &'a [u8],
+    filename: &'a str,
+    image_hash: &'a str,
+    processing_mode: &'a ProcessingMode,
+    file_id: u64,
+    task_id: Uuid,
+    context: &'a InferenceContext,
+    cache_service: Option<&'a web::Data<CacheService>>,
+}
+
+impl<'a> ProcessImageParams<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        model: &'a web::Data<Arc<Mutex<Model>>>,
+        image_data: &'a [u8],
+        filename: &'a str,
+        image_hash: &'a str,
+        processing_mode: &'a ProcessingMode,
+        file_id: u64,
+        task_id: Uuid,
+        context: &'a InferenceContext,
+        cache_service: Option<&'a web::Data<CacheService>>,
+    ) -> Self {
+        Self {
+            model,
+            image_data,
+            filename,
+            image_hash,
+            processing_mode,
+            file_id,
+            task_id,
+            context,
+            cache_service,
+        }
+    }
+}
+
+async fn process_image_inference(params: ProcessImageParams<'_>) -> Value {
+    let start_time = std::time::Instant::now();
+    info!(
+        "Attempting to acquire model lock for file_id: {} at {:?}ms",
+        params.file_id,
+        start_time.elapsed().as_millis()
+    );
+
+    // Clone the model Arc for use in spawn_blocking
+    let model_clone = params.model.clone();
+    let image_data = params.image_data.to_vec();
+    let processing_mode = params.processing_mode.clone();
+    let file_id = params.file_id;
+    let image_hash = params.image_hash.to_string();
+    let use_cache = params.context.use_cache;
+    let filename = params.filename.to_string();
+    let task_id = params.task_id;
+
+    info!(
+        "Starting model inference for file_id: {} at {:?}ms",
+        file_id,
+        start_time.elapsed().as_millis()
+    );
+
+    // Use spawn_blocking for inference to prevent blocking the async runtime
+    let inference_result = tokio::task::spawn_blocking(move || {
+        let mut model_guard = match model_clone.lock() {
+            Ok(guard) => guard,
             Err(e) => {
-                warn!("Failed to cache image '{}': {:?}", filename, e);
-            }
-        }
-
-        let model_operation_outcome: Result<(Vec<f32>, bool, f32), String> = {
-            let mut model_guard = model.lock().map_err(|e| {
-                error!("Failed to lock model: {:?}", e);
-                actix_web::error::ErrorInternalServerError(format!(
-                    "Critical error: Failed to lock model: {}",
-                    e
-                ))
-            })?;
-
-            if let Err(e) = model_guard.persistent_load(&processing_mode) {
-                let error_msg = format!(
-                    "Failed to load models for mode {:?}: {:?}",
-                    processing_mode, e
-                );
-                error!("{}", error_msg);
-                return Ok(
-                    HttpResponse::InternalServerError().json(ErrorResponse { error: error_msg })
-                );
-            }
-
-            match model_guard.inference(image_data, &processing_mode) {
-                Ok(predictions_from_model) => {
-                    let (is_ai, confidence) = model_guard.calculate_result(&predictions_from_model);
-                    Ok((predictions_from_model.clone(), is_ai, confidence))
-                }
-                Err(e) => {
-                    let error_msg =
-                        format!("Model inference error for image '{}': {:?}", filename, e);
-                    error!("{}", error_msg);
-                    Err(error_msg)
-                }
+                return Err(format!("Failed to lock model: {}", e));
             }
         };
 
-        match model_operation_outcome {
-            Ok((predictions_cloned, is_ai_val, confidence_val)) => {
-                let inference_result_obj = InferenceResponse {
-                    predictions: predictions_cloned.clone(),
-                    class_labels: vec!["AI Generated".into(), "Human Created".into()],
-                    is_ai: is_ai_val,
-                    confidence: confidence_val,
-                };
-
-                match cache_service
-                    .cache_inference_result(
-                        user_id,
-                        image_hash.clone(),
-                        &processing_mode,
-                        &predictions_cloned,
-                        is_ai_val,
-                        confidence_val,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        info!("Inference result cached for image hash: {}", image_hash);
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to cache inference result for image hash {}: {:?}",
-                            image_hash, e
-                        );
-                    }
-                }
-
-                results.push(json!({
-                    "task": { "id": task_id.to_string(), "status": "completed" },
-                    "inference": inference_result_obj,
-                    "cached": false
-                }));
-            }
-            Err(error_individual_image) => {
-                results.push(json!({
-                    "task": { "id": task_id.to_string(), "status": "error" },
-                    "error": error_individual_image
-                }));
-            }
-        }
-    }
-
-    info!(
-        "Completed processing {} images for user: {}",
-        images_with_metadata.len(),
-        user_id
-    );
-    Ok(HttpResponse::Ok().json(json!({ "results": results })))
-}
-
-async fn handle_inference_public(
-    model: web::Data<Arc<Mutex<Model>>>,
-    mut payload: Multipart,
-) -> Result<HttpResponse, Error> {
-    info!("Processing public inference request (no authentication)");
-
-    let mut results = Vec::new();
-    let mut images_with_metadata: Vec<(Vec<u8>, String, String)> = Vec::new();
-    let mut processing_mode = ProcessingMode::IntermediateFusionEnsemble;
-
-    while let Ok(Some(mut field)) = payload.try_next().await {
-        let content_disposition = field.content_disposition();
-        let field_name = content_disposition
-            .as_ref()
-            .unwrap()
-            .get_name()
-            .unwrap_or("image");
-
-        if field_name == "processing_mode" {
-            let mut mode_data = Vec::new();
-            while let Some(chunk) = field.next().await {
-                let data = chunk?;
-                mode_data.extend_from_slice(&data);
-            }
-            let mode_str = String::from_utf8_lossy(&mode_data);
-            processing_mode = match mode_str.trim() {
-                "IntermediateFusionEnsemble" => ProcessingMode::IntermediateFusionEnsemble,
-                "LateFusionEnsemble" => ProcessingMode::LateFusionEnsemble,
-                _ => ProcessingMode::IntermediateFusionEnsemble,
-            };
-            info!("Processing mode set to: {:?}", processing_mode);
-            continue;
-        }
-
-        let filename = content_disposition
-            .as_ref()
-            .and_then(|cd| cd.get_filename())
-            .unwrap_or("unknown")
-            .to_string();
-
-        let content_type = field
-            .content_type()
-            .map(|ct| ct.to_string())
-            .unwrap_or_else(|| "application/octet-stream".to_string());
-
-        let mut image_data = Vec::new();
-        while let Some(chunk) = field.next().await {
-            let data = chunk?;
-            image_data.extend_from_slice(&data);
-        }
-
-        if !image_data.is_empty() {
-            images_with_metadata.push((image_data, filename, content_type));
-        }
-    }
-
-    info!(
-        "Processing {} images with mode: {:?}",
-        images_with_metadata.len(),
-        processing_mode
-    );
-
-    // Process each image without caching
-    for (image_data, filename, _mime_type) in &images_with_metadata {
-        let task_id = Uuid::new_v4();
-        info!("Processing public image: {}", filename);
-
-        let mut model_guard = model.lock().map_err(|e| {
-            error!("Failed to lock model: {:?}", e);
-            actix_web::error::ErrorInternalServerError("Failed to lock model")
-        })?;
-
         if let Err(e) = model_guard.persistent_load(&processing_mode) {
-            error!(
-                "Failed to load models for mode {:?}: {:?}",
-                processing_mode, e
-            );
-            return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
-                error: format!("Failed to load models for mode {:?}", processing_mode),
-            }));
+            return Err(format!("Failed to load models: {:?}", e));
         }
 
-        match model_guard.inference(image_data, &processing_mode) {
+        match model_guard.inference(&image_data, &processing_mode) {
             Ok(predictions) => {
                 let (is_ai, confidence) = model_guard.calculate_result(&predictions);
-                let response = InferenceResponse {
+                let inference_response = InferenceResponse {
                     predictions: predictions.clone(),
                     class_labels: vec!["AI Generated".into(), "Human Created".into()],
                     is_ai,
                     confidence,
+                    image_hash: if use_cache { Some(image_hash) } else { None },
                 };
 
-                results.push(json!({
-                    "task": {
-                        "id": task_id,
-                        "status": "completed"
-                    },
-                    "inference": response,
-                    "cached": false
-                }));
+                Ok((predictions, is_ai, confidence, inference_response))
             }
-            Err(e) => {
-                let error_msg = format!("Model inference error: {:?}", e);
-                error!("{}", error_msg);
+            Err(e) => Err(format!("Inference error: {:?}", e)),
+        }
+    })
+    .await;
 
-                results.push(json!({
-                    "task": {
-                        "id": task_id,
-                        "status": "error"
-                    },
-                    "error": error_msg
-                }));
-            }
+    let inference_result = match inference_result {
+        Ok(Ok(result)) => {
+            info!(
+                "Completed model inference for file_id: {} at {:?}ms",
+                file_id,
+                start_time.elapsed().as_millis()
+            );
+            result
+        }
+        Ok(Err(e)) => {
+            error!(
+                "Model inference error for streaming image '{}': {}",
+                filename, e
+            );
+            return json!({
+                "file_id": file_id,
+                "task": { "id": task_id.to_string(), "status": "error" },
+                "error": e
+            });
+        }
+        Err(e) => {
+            error!(
+                "Spawn blocking error for streaming image '{}': {:?}",
+                filename, e
+            );
+            return json!({
+                "file_id": file_id,
+                "task": { "id": task_id.to_string(), "status": "error" },
+                "error": format!("Task error: {:?}", e)
+            });
+        }
+    };
+
+    // Now handle the result and cache it (outside the mutex scope)
+    let (predictions, is_ai, confidence, inference_response) = inference_result;
+
+    // Cache the result
+    if params.context.use_cache && params.cache_service.is_some() {
+        let cache_service = params.cache_service.unwrap();
+        let user_id = params.context.user_id.unwrap();
+
+        if let Err(e) = cache_service
+            .cache_inference_result(
+                user_id,
+                params.image_hash.to_string(),
+                params.processing_mode,
+                &predictions,
+                is_ai,
+                confidence,
+            )
+            .await
+        {
+            warn!("Failed to cache streaming inference result: {:?}", e);
         }
     }
 
-    info!("Completed processing {} public images", results.len());
-    Ok(HttpResponse::Ok().json(json!({ "results": results })))
+    json!({
+        "file_id": params.file_id,
+        "task": { "id": params.task_id.to_string(), "status": "completed" },
+        "inference": inference_response,
+        "cached": false
+    })
+}
+
+async fn handle_inference_authenticated_stream(
+    model: web::Data<Arc<Mutex<Model>>>,
+    payload: Multipart,
+    cache_service: web::Data<CacheService>,
+    user: AuthenticatedUser,
+) -> Result<HttpResponse, Error> {
+    let context = InferenceContext::authenticated(user.0);
+    handle_inference_streaming(model, payload, Some(cache_service), context).await
+}
+
+async fn handle_inference_public_stream(
+    model: web::Data<Arc<Mutex<Model>>>,
+    payload: Multipart,
+) -> Result<HttpResponse, Error> {
+    let context = InferenceContext::public();
+    handle_inference_streaming(model, payload, None, context).await
 }
 
 async fn handle_cache_history(
@@ -474,7 +604,8 @@ async fn handle_cache_history(
                             "predictions": predictions,
                             "class_labels": ["AI Generated", "Human Created"],
                             "is_ai": latest_result.is_ai,
-                            "confidence": latest_result.confidence
+                            "confidence": latest_result.confidence,
+                            "image_hash": entry.image_hash
                         });
 
                         session_data["results"][file_id_counter.to_string()] = inference_response;

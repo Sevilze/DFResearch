@@ -48,7 +48,7 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                         move || link.send_message(Msg::ClearAllFiles)
                     })}
                 >
-                    <i class="fa-solid fa-trash"></i>{" Clear All"}
+                    <i class="fa-solid fa-trash"></i>{"Clear All"}
                 </button>
                 <button
                     class="analyze-btn"
@@ -66,8 +66,9 @@ pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
                         let link = link.clone();
                         move || link.callback(|_| Msg::AnalyzeAll).emit(())
                     })}
+                    disabled={model.loading}
                 >
-                    <i class="fa-solid fa-magnifying-glass"></i>{" Analyze All"}
+                    { render_analyze_all_button_content(model) }
                 </button>
             </div>
         </div>
@@ -139,7 +140,7 @@ fn render_selected_image_preview(model: &Model) -> Html {
 }
 
 fn render_analyze_button_content(model: &Model) -> Html {
-    if model.loading {
+    if model.loading && !model.batch_processing {
         html! { <><i class="fa-solid fa-spinner fa-spin"></i>{" Analyzing..."}</> }
     } else {
         let filename = model
@@ -154,6 +155,19 @@ fn render_analyze_button_content(model: &Model) -> Html {
             filename
         };
 
-        html! { <><i class="fa-solid fa-magnifying-glass"></i>{ format!(" Analyze \"{}\"", display_name) }</> }
+        html! { <><i class="fa-solid fa-magnifying-glass"></i>{ format!("Analyze \"{}\"", display_name) }</> }
+    }
+}
+
+fn render_analyze_all_button_content(model: &Model) -> Html {
+    if model.loading && model.batch_processing {
+        let progress_text = if model.future_requests > 0 {
+            format!(" Analyzing... ({}/{})", model.completed_requests, model.future_requests)
+        } else {
+            " Analyzing...".to_string()
+        };
+        html! { <><i class="fa-solid fa-spinner fa-spin"></i>{progress_text}</> }
+    } else {
+        html! { <><i class="fa-solid fa-magnifying-glass"></i>{"Analyze All"}</> }
     }
 }

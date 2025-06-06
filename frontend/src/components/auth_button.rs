@@ -56,8 +56,10 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
                 };
 
                 if is_automatic {
-                    log::info!("AuthButton: Detected automatic re-authentication (elapsed: {}ms)",
-                              current_time - login_start_time.as_ref().unwrap_or(&current_time));
+                    log::info!(
+                        "AuthButton: Detected automatic re-authentication (elapsed: {}ms)",
+                        current_time - login_start_time.as_ref().unwrap_or(&current_time)
+                    );
                     was_automatic_reauth.set(true);
                     auth_state.set(AuthState::Authenticating);
                 } else {
@@ -108,9 +110,9 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
             log::info!("AuthButton: Starting login process at {}", start_time);
 
             let window = web_sys::window().unwrap();
-            let _ = window
-                .location()
-                .set_href("http://localhost:8081/auth/login");
+            let base_url = window.location().origin().unwrap().to_string();
+            let login_url = format!("{}/auth/login", base_url);
+            let _ = window.location().set_href(&login_url);
         })
     };
 

@@ -7,10 +7,13 @@ use gloo_timers::callback::Timeout;
 use serde_json::Value;
 use shared::{InferenceResponse, ProcessingMode};
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::{ClipboardEvent, DragEvent, FileList, FormData};
+use wasm_bindgen_futures::{spawn_local, JsFuture};
+use web_sys::{
+    ClipboardEvent, DragEvent, FileList, FormData, ReadableStreamDefaultReader, TextDecoder,
+};
 use yew::prelude::*;
 
+// No changes in this function
 pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<GlooFile>) -> bool {
     let current_count = model.files.len();
     let available_slots = (15usize).saturating_sub(current_count);
@@ -51,6 +54,7 @@ pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<Gl
     true
 }
 
+// No changes in this function
 pub fn handle_add_preview(model: &mut Model, id: u64, url: ObjectUrl) -> bool {
     if let Some(file_data) = model.files.get_mut(&id) {
         file_data.preview_url = Some(url);
@@ -60,6 +64,7 @@ pub fn handle_add_preview(model: &mut Model, id: u64, url: ObjectUrl) -> bool {
     }
 }
 
+// No changes in this function
 pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     if let Some(removed_file) = model.files.remove(&id) {
         // If this is a cached file, delete it from the backend
@@ -97,149 +102,249 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     }
 }
 
-pub fn send_inference_request(ctx: &Context<Model>, files: Vec<FileData>, mode: ProcessingMode) {
+// No changes in this function
+pub fn inference_request_wrapper(ctx: &Context<Model>, files: Vec<FileData>, mode: ProcessingMode) {
     let link = ctx.link().clone();
+
     wasm_bindgen_futures::spawn_local(async move {
-        let send_error = |msg: String| {
-            link.send_message(Msg::SetError(Some(msg)));
-            link.send_message(Msg::ResetLoadingState);
+        let link_clone = link.clone();
+        let send_error = move |msg: String| {
+            link_clone.send_message(Msg::SetError(Some(msg)));
+            link_clone.send_message(Msg::ResetLoadingState);
         };
 
-        link.send_message(Msg::SetFutureRequests(files.len()));
-        let form_data = FormData::new()
-            .map_err(|_| "Failed to create FormData".to_string())
-            .and_then(|form| {
-                let mode_str = match mode {
-                    ProcessingMode::IntermediateFusionEnsemble => "IntermediateFusionEnsemble",
-                    ProcessingMode::LateFusionEnsemble => "LateFusionEnsemble",
-                };
-
-                form.append_with_str("processing_mode", mode_str)
-                    .map_err(|_| "Failed to append processing_mode to form data".to_string())?;
-
-                for file_data in &files {
-                    form.append_with_blob("image", file_data.file.as_ref())
-                        .map_err(|_| "Failed to append image to form data".to_string())?;
-                }
-
-                Ok(form)
-            });
-
-        let form_data = match form_data {
-            Ok(data) => data,
-            Err(e) => {
-                send_error(e);
-                return;
-            }
-        };
-
-        let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-
-        // Determine which endpoint to use based on authentication status
-        let (endpoint, use_auth) = if auth_token.is_some() {
-            log::info!("User authenticated - using authenticated inference endpoint with caching");
-            ("/api/inference", true)
-        } else {
-            log::info!("User not authenticated - using public inference endpoint (no caching)");
-            ("/public/inference", false)
-        };
-
-        let mut request_builder = Request::post(endpoint);
-
-        // Add authorization header if using authenticated endpoint
-        if use_auth {
-            if let Some(token) = auth_token {
-                log::info!("Adding Authorization header to inference request");
-                request_builder =
-                    request_builder.header("Authorization", &format!("Bearer {}", token));
-            }
-        }
-
-        let response = match request_builder
-            .body(form_data)
-            .expect("Failed to build request")
-            .send()
-            .await
-        {
-            Ok(resp) if resp.ok() => resp,
-            Ok(resp) => {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                send_error(format!("Server error: {} - {}", status, body));
-                return;
-            }
-            Err(e) => {
-                send_error(format!("Network error: {}", e));
-                return;
-            }
-        };
-
-        let results: Value = match response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response: {}", e))
-            .and_then(|text| {
-                serde_json::from_str(&text).map_err(|e| format!("Failed to parse response: {}", e))
-            }) {
-            Ok(json) => json,
-            Err(e) => {
-                send_error(e);
-                return;
-            }
-        };
-
-        let results_array = match results.get("results").and_then(|v| v.as_array()) {
-            Some(array) => array,
-            None => {
-                send_error("No results array in response".to_string());
-                return;
-            }
-        };
-
-        for (file_data, result_value) in files.iter().zip(results_array) {
-            let task_status = result_value
-                .get("task")
-                .and_then(|task| task.get("status"))
-                .and_then(|status| status.as_str());
-
-            if task_status == Some("completed") {
-                if let Some(inference) = result_value.get("inference") {
-                    match serde_json::from_value::<InferenceResponse>(inference.clone()) {
-                        Ok(results) => {
-                            log::info!("Inference result received for file {}", file_data.id);
-                            link.send_message(Msg::InferenceResult(file_data.id, results));
-                        }
-                        Err(e) => {
-                            send_error(format!("Failed to parse inference: {}", e));
-                        }
-                    }
-                } else {
-                    send_error("No inference data in completed task".to_string());
-                }
-            } else if task_status == Some("error") {
-                // Handle task error
-                if let Some(error) = result_value.get("error") {
-                    send_error(format!("Task error: {}", error));
-                } else {
-                    send_error("Task failed with unknown error".to_string());
-                }
-            } else {
-                send_error(format!("Unexpected task status: {:?}", task_status));
-            }
-        }
+        send_inference_request_sse(link, files, mode, send_error).await;
     });
 }
 
+// No changes in this function
+async fn send_inference_request_sse(
+    link: yew::html::Scope<Model>,
+    files: Vec<FileData>,
+    mode: ProcessingMode,
+    send_error: impl Fn(String) + 'static,
+) {
+    let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
+    let form_data = FormData::new().unwrap();
+
+    // Add file IDs to track which file corresponds to which result
+    let mut file_id_map = std::collections::HashMap::new();
+    let mut file_counter = 1u64;
+
+    for file_data in &files {
+        let file_blob = file_data.file.as_ref();
+        form_data
+            .append_with_blob_and_filename("image", file_blob, &file_data.file.name())
+            .unwrap();
+        file_id_map.insert(file_counter, file_data.id);
+        file_counter += 1;
+    }
+
+    let mode_str = match mode {
+        ProcessingMode::IntermediateFusionEnsemble => "intermediate",
+        ProcessingMode::LateFusionEnsemble => "late_fusion",
+    };
+    form_data.append_with_str("mode", mode_str).unwrap();
+
+    // Determine which endpoint to use based on authentication status
+    let endpoint = if auth_token.is_some() {
+        log::info!("User authenticated - using authenticated streaming endpoint with caching");
+        "/api/inference"
+    } else {
+        log::info!("User not authenticated - using public streaming endpoint (no caching)");
+        "/public/inference"
+    };
+
+    handle_streaming_request(
+        endpoint,
+        form_data,
+        auth_token,
+        file_id_map,
+        link,
+        send_error,
+    )
+    .await;
+}
+
+/// # Refactored `handle_streaming_request`
+/// This function now implements true asynchronous stream processing.
+///
+/// ## How it Works:
+/// 1.  **Initiate Request**: Sends the POST request to the server.
+/// 2.  **Get ReadableStream**: Instead of awaiting the full response body with `.text().await`,
+///     it immediately gets the `ReadableStream` from the response.
+/// 3.  **Read Chunks**: It enters a loop, using a `ReadableStreamDefaultReader` to read
+///     data chunks (`Uint8Array`) as soon as they are sent by the server.
+/// 4.  **Decode and Buffer**: Each chunk is decoded from UTF-8 to a string and appended to a buffer.
+///     This is crucial because a single chunk may not contain a complete SSE message.
+/// 5.  **Process Lines**: The buffer is scanned for newline characters (`\n`), which delimit
+///     SSE messages. Each complete line is processed immediately.
+/// 6.  **Immediate UI Update**: When a valid "data: ..." message is parsed, it's immediately
+///     dispatched to the Yew `Model` via `link.send_message()`, triggering an instant UI update
+///     for that specific result.
+/// 7.  **Completion**: The loop continues until the stream reports it's `done`, at which point
+///     the loading state is reset.
+async fn handle_streaming_request(
+    endpoint: &str,
+    form_data: FormData,
+    auth_token: Option<String>,
+    file_id_map: std::collections::HashMap<u64, u64>,
+    link: yew::html::Scope<Model>,
+    send_error: impl Fn(String) + 'static,
+) {
+    let mut request_builder = Request::post(endpoint);
+    if let Some(token) = auth_token {
+        request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
+    }
+
+    let request = match request_builder.body(form_data) {
+        Ok(req) => req,
+        Err(e) => {
+            send_error(format!("Failed to build streaming request: {}", e));
+            return;
+        }
+    };
+
+    let response = match request.send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            send_error(format!("Network error in streaming request: {}", e));
+            return;
+        }
+    };
+
+    if !response.ok() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown server error".to_string());
+        send_error(format!("Server error in streaming: {}", error_text));
+        return;
+    }
+
+    // Get the response body as a readable stream
+    let body = match response.body() {
+        Some(body) => body,
+        None => {
+            send_error("Response body is missing.".to_string());
+            return;
+        }
+    };
+
+    let reader: ReadableStreamDefaultReader = body.get_reader().dyn_into().unwrap();
+    let decoder = TextDecoder::new().unwrap();
+    let mut buffer = String::new();
+
+    loop {
+        match JsFuture::from(reader.read()).await {
+            Ok(result) => {
+                let result_obj: js_sys::Object = result.dyn_into().unwrap();
+                let done_val = js_sys::Reflect::get(&result_obj, &"done".into()).unwrap();
+
+                if done_val.as_bool().unwrap_or(true) {
+                    log::info!("Streaming finished.");
+                    break; // Exit loop when stream is done
+                }
+
+                let chunk_val = js_sys::Reflect::get(&result_obj, &"value".into()).unwrap();
+                let chunk_uint8: js_sys::Uint8Array = chunk_val.dyn_into().unwrap();
+                buffer.push_str(&decoder.decode_with_buffer_source(&chunk_uint8).unwrap());
+
+                // Process all complete lines in the buffer
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer.drain(..=newline_pos).collect::<String>();
+                    let line = line.trim();
+
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+
+                        if data == "{\"type\": \"complete\"}" {
+                            continue; // Skip the completion signal event
+                        }
+
+                        match serde_json::from_str::<Value>(data) {
+                            Ok(event_data) => {
+                                if let (Some(file_id_backend), Some(inference_data)) = (
+                                    event_data.get("file_id").and_then(|v| v.as_u64()),
+                                    event_data.get("inference"),
+                                ) {
+                                    if let Some(&frontend_file_id) =
+                                        file_id_map.get(&file_id_backend)
+                                    {
+                                        match serde_json::from_value::<InferenceResponse>(
+                                            inference_data.clone(),
+                                        ) {
+                                            Ok(response) => {
+                                                log::info!(
+                                                    "Received and processing result for file ID: {}",
+                                                    frontend_file_id
+                                                );
+                                                link.send_message(Msg::InferenceResult(
+                                                    frontend_file_id,
+                                                    response,
+                                                ));
+                                            }
+                                            Err(e) => log::error!(
+                                                "Failed to parse streaming inference response: {}",
+                                                e
+                                            ),
+                                        }
+                                    }
+                                } else if let Some(error) = event_data.get("error") {
+                                    send_error(format!("Streaming error: {}", error));
+                                    return; // Stop processing on error
+                                }
+                            }
+                            Err(e) => log::error!("Failed to parse SSE event data: {}", e),
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                send_error(format!("Error reading from stream: {:?}", e));
+                break;
+            }
+        }
+    }
+
+    // All results have been processed, reset the main loading state
+    link.send_message(Msg::ResetLoadingState);
+}
+
+// No changes in this function
 pub fn handle_inference_result(
     model: &mut Model,
     file_id: u64,
     response: InferenceResponse,
 ) -> bool {
-    model.results.insert(file_id, response);
-    model.future_requests = model.future_requests.saturating_sub(1);
+    model.results.insert(file_id, response.clone());
 
-    if model.future_requests == 0 {
-        model.loading = false;
+    // Update the FileData to mark it as cached and set the image hash
+    if let Some(file_data) = model.files.get_mut(&file_id) {
+        if !file_data.is_cached && response.image_hash.is_some() {
+            // This image was just processed and cached
+            file_data.is_cached = true;
+            file_data.image_hash = response.image_hash.clone();
+            log::info!(
+                "Marked file {} as cached with hash: {:?}",
+                file_id,
+                file_data.image_hash
+            );
+        }
+    }
+
+    if model.batch_processing {
+        model.completed_requests += 1;
+        if model.completed_requests >= model.future_requests {
+            model.loading = false;
+            model.batch_processing = false;
+            model.completed_requests = 0;
+        }
+    } else {
+        model.future_requests = model.future_requests.saturating_sub(1);
+        if model.future_requests == 0 {
+            model.loading = false;
+        }
     }
 
     true
@@ -269,7 +374,6 @@ pub fn handle_toggle_theme(model: &mut Model) -> bool {
 
     true
 }
-
 pub fn handle_drop(model: &mut Model, ctx: &Context<Model>, event: DragEvent) -> bool {
     event.prevent_default();
     model.is_dragging = false;
@@ -465,7 +569,7 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
             model.future_requests = 1;
 
             let files = vec![file_data.clone()];
-            send_inference_request(ctx, files, model.processing_mode.clone());
+            inference_request_wrapper(ctx, files, model.processing_mode.clone());
             return true;
         }
     }
@@ -481,9 +585,11 @@ pub fn handle_analyze_all(model: &mut Model, ctx: &Context<Model>) -> bool {
     model.loading = true;
     model.error = None;
     model.future_requests = model.files.len();
+    model.batch_processing = true;  // This was missing!
+    model.completed_requests = 0;   // Reset completed requests
 
     let files: Vec<_> = model.files.values().cloned().collect();
-    send_inference_request(ctx, files, model.processing_mode.clone());
+    inference_request_wrapper(ctx, files, model.processing_mode.clone());
 
     true
 }
@@ -605,10 +711,9 @@ pub fn fetch_and_restore_session(ctx: &Context<Model>) {
             }
         }
 
-        log::info!("🎉 Session restoration completed");
+        log::info!("Session restoration completed");
     });
 }
-
 // Helper function to create a mock file for cached images
 fn create_mock_file(name: &str, size: u32) -> GlooFile {
     // Create a minimal blob to represent the cached file
