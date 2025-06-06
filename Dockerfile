@@ -37,10 +37,10 @@ ENV LIBTORCH=${LIBTORCH} \
     CXXFLAGS=${CXXFLAGS} \
     CARGO_JOBS=${CARGO_JOBS}
 
+COPY libtorch /opt/libtorch
 COPY --from=planner /usr/src/app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
-COPY libtorch /opt/libtorch
 COPY . .
 RUN cd backend && cargo build --release --locked -p backend
 
