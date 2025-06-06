@@ -9,7 +9,6 @@ on:
       - main
 
 env:
-  REPOSITORY: dfresearchimage
   REGION: asia-southeast2
 
 jobs:
@@ -38,7 +37,7 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+          credentials_json: "${{ secrets.GCP_SA_KEY }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -47,7 +46,21 @@ jobs:
         run: |
           gcloud auth configure-docker $REGION-docker.pkg.dev
 
-      - name: Build Docker image
+      - name: Download LibTorch
+        run: |
+          echo "Downloading LibTorch..."
+          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.7.0%2Bcpu.zip
+          unzip -q libtorch-cxx11-abi-shared-with-deps-2.7.0+cpu.zip
+          rm libtorch-cxx11-abi-shared-with-deps-2.7.0+cpu.zip
+
+      - name: Pull model container from Artifact Registry
+        run: |
+          echo "Pulling model container from registry..."
+          docker pull $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/models:latest
+          docker tag $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/models:latest models:latest
+          echo "Model container pulled successfully!"
+
+      - name: Build main application Docker image
         run: |
           docker build \
             --build-arg LIBTORCH="$LIBTORCH" \
@@ -61,16 +74,16 @@ jobs:
 
       - name: Tag and Push to Artifact Registry
         run: |
-          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:latest
-          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:$GITHUB_SHA
-          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:latest
-          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:$GITHUB_SHA
+          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:latest
+          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:$GITHUB_SHA
+          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:latest
+          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:$GITHUB_SHA
 
       - name: Deploy to Cloud Run
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           gcloud run deploy ${{ secrets.SERVICE }} \
-            --image $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/dfresearch:$GITHUB_SHA \
+            --image $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:$GITHUB_SHA \
             --platform managed \
             --region $REGION \
             --allow-unauthenticated \
@@ -93,7 +106,9 @@ jobs:
             --cpu 2 \
             --timeout 300 \
             --max-instances 3 \
-            --port 8081
+            --port 8081 \
+            --no-cpu-throttling \
+            --execution-environment gen2
 
       - name: Show deployment URL
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

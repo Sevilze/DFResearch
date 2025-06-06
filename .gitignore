@@ -1,7 +1,17 @@
 .vscode
 .venv
 __pycache__
-models
+
+# Exclude entire models directory - models stored securely in private S3 bucket
+pyproject/models/
+
+# Large ML model files - exclude all formats
+*.pth
+*.pt
+*.pkl
+*.h5
+*.onnx
+*.safetensors
 
 # Fullstack rust
 .env
@@ -9,8 +19,8 @@ models
 dist
 public
 /target
-libtorch
-libtorchgpu
+libtorch/
+libtorchgpu/
 shell_scripts
 
 # Node.js dependencies
@@ -19,7 +29,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Package lock files (keep package.json but ignore lock files for flexibility)
+# Package lock files
 package-lock.json
 yarn.lock
-Cargo.lock

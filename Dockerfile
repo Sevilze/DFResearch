@@ -37,7 +37,6 @@ COPY backend ./backend
 COPY frontend ./frontend
 COPY shared ./shared
 COPY pyproject/dfresearch /usr/src/app/pyproject/dfresearch
-COPY pyproject/models /usr/src/app/pyproject/models
 
 RUN  . $HOME/.cargo/env && cd backend && cargo build --release -p backend
 
@@ -90,8 +89,9 @@ COPY --from=frontend-builder /usr/src/app/frontend/ ./frontend
 COPY --from=backend-builder /usr/src/app/target/release/backend /usr/local/bin/backend
 COPY --from=backend-builder /usr/src/app/frontend/ ./frontend
 COPY --from=backend-builder /usr/src/app/backend ./backend
-COPY --from=backend-builder /usr/src/app/pyproject/models /usr/src/app/pyproject/models
 COPY --from=backend-builder /usr/src/app/pyproject/dfresearch /usr/src/app/pyproject/dfresearch
+COPY --from=models:latest /models /usr/src/app/pyproject/models
+
 COPY config /usr/src/app/config
 
 EXPOSE 8081

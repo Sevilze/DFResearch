@@ -1,5 +1,6 @@
 *
 !pyproject/
+!pyproject/models/
 !libtorch/
 !backend/
 !frontend/
@@ -9,5 +10,6 @@
 !Cargo.lock
 !docker-compose.yml
 !Dockerfile
+!Dockerfile.models
 !frontend/dist/
 !frontend/index.html
