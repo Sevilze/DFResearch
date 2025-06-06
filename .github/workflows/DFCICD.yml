@@ -10,6 +10,8 @@ on:
 
 env:
   REGION: asia-southeast2
+  IMAGE_NAME: asia-southeast2-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch
+  LIBTORCH_VERSION: "2.7.0"
 
 jobs:
   build-and-deploy:
@@ -17,24 +19,13 @@ jobs:
     env:
       DOCKER_BUILDKIT: 1
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: 'read'
+      id-token: 'write'
+      actions: 'write'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Load environment variables from .env
-        id: dotenv
-        run: |
-          echo "LIBTORCH=/opt/libtorch" >> $GITHUB_ENV
-          echo "LIBTORCH_LIB=/opt/libtorch" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=/opt/libtorch/lib" >> $GITHUB_ENV
-          echo "CXXFLAGS=-std=c++17" >> $GITHUB_ENV
-          echo "CARGO_JOBS=4" >> $GITHUB_ENV
 
       - name: Google Auth
         id: auth
@@ -43,51 +34,55 @@ jobs:
           workload_identity_provider: "projects/${{ secrets.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ secrets.WORKLOAD_IDENTITY_POOL }}/providers/github-provider"
           service_account: ${{ secrets.SERVICE_ACCOUNT }}
 
-      - name: Set up Cloud SDK
+      - name: Set up Cloud SDK and Docker
         uses: google-github-actions/setup-gcloud@v2
-
       - name: Configure Docker to use gcloud as a credential helper
-        run: |
-          gcloud auth configure-docker $REGION-docker.pkg.dev
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev
 
-      - name: Download LibTorch
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache and Download LibTorch
+        id: cache-libtorch
+        uses: actions/cache@v4
+        with:
+          path: libtorch
+          key: ${{ runner.os }}-libtorch-${{ env.LIBTORCH_VERSION }}
+      - name: Download LibTorch if not cached
+        if: steps.cache-libtorch.outputs.cache-hit != 'true'
         run: |
           echo "Downloading LibTorch..."
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.7.0%2Bcpu.zip
-          unzip -q libtorch-cxx11-abi-shared-with-deps-2.7.0+cpu.zip
-          rm libtorch-cxx11-abi-shared-with-deps-2.7.0+cpu.zip
+          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${{ env.LIBTORCH_VERSION }}%2Bcpu.zip
+          unzip -q libtorch-cxx11-abi-shared-with-deps-${{ env.LIBTORCH_VERSION }}+cpu.zip
+          rm libtorch-cxx11-abi-shared-with-deps-${{ env.LIBTORCH_VERSION }}+cpu.zip
 
       - name: Pull model container from Artifact Registry
         run: |
-          echo "Pulling model container from registry..."
           docker pull $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest
           docker tag $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest models:latest
-          echo "Model container pulled successfully!"
 
-      - name: Build main application Docker image
-        run: |
-          docker build \
-            --build-arg LIBTORCH="$LIBTORCH" \
-            --build-arg LIBTORCH_LIB="$LIBTORCH_LIB" \
-            --build-arg LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
-            --build-arg CXXFLAGS="$CXXFLAGS" \
-            --build-arg CARGO_JOBS="$CARGO_JOBS" \
-            --cache-from=sevilze/dfresearch:latest \
-            --network=host \
-            --tag dfresearch:latest .
-
-      - name: Tag and Push to Artifact Registry
-        run: |
-          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:latest
-          docker tag dfresearch:latest $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:$GITHUB_SHA
-          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:latest
-          docker push $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:$GITHUB_SHA
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            LIBTORCH=/opt/libtorch
+            LIBTORCH_LIB=/opt/libtorch
+            LD_LIBRARY_PATH=/opt/libtorch/lib
+            CXXFLAGS=-std=c++17
+            CARGO_JOBS=$(nproc)
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
 
       - name: Deploy to Cloud Run
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           gcloud run deploy ${{ secrets.SERVICE }} \
-            --image $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch:$GITHUB_SHA \
+            --image ${{ env.IMAGE_NAME }}:${{ github.sha }} \
             --platform managed \
             --region $REGION \
             --allow-unauthenticated \

@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.87-bookworm AS builder
 WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -42,7 +42,7 @@ COPY shared ./shared
 RUN cd backend && cargo build --release --locked -p backend
 
 
-FROM rust:1.88-bookworm AS frontend-builder
+FROM rust:1.87-bookworm AS frontend-builder
 WORKDIR /usr/src/app
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
