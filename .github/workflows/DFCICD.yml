@@ -104,11 +104,12 @@ jobs:
             --set-env-vars="JWT_SECRET=${{ secrets.JWT_SECRET }}" \
             --memory 2Gi \
             --cpu 2 \
-            --timeout 300 \
+            --timeout 600 \
             --max-instances 3 \
             --port 8081 \
             --no-cpu-throttling \
-            --execution-environment gen2
+            --execution-environment gen2 \
+            --cpu-boost
 
       - name: Show deployment URL
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

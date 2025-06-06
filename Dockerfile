@@ -90,7 +90,7 @@ COPY --from=backend-builder /usr/src/app/target/release/backend /usr/local/bin/b
 COPY --from=backend-builder /usr/src/app/frontend/ ./frontend
 COPY --from=backend-builder /usr/src/app/backend ./backend
 COPY --from=backend-builder /usr/src/app/pyproject/dfresearch /usr/src/app/pyproject/dfresearch
-COPY --from=models:latest /models /usr/src/app/pyproject/models
+COPY --from=models:latest /models/ /usr/src/app/pyproject/models/
 
 COPY config /usr/src/app/config
 
