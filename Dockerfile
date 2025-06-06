@@ -53,7 +53,7 @@ COPY backend ./backend
 COPY frontend ./frontend
 COPY shared ./shared
 
-RUN cd frontend && npm install && npm run generate-favicon && npm run build-css-prod
+RUN cd frontend && npm install && npm run build-css-prod
 RUN cd frontend && trunk build --release
 
 FROM debian:bookworm-slim AS final

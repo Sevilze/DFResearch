@@ -1,23 +1,12 @@
 .vscode
 .venv
 __pycache__
-
-# Exclude entire models directory - models stored securely in private S3 bucket
 pyproject/models/
-
-# Large ML model files - exclude all formats
-*.pth
-*.pt
-*.pkl
-*.h5
-*.onnx
-*.safetensors
 
 # Fullstack rust
 .env
 .sqlx
 dist
-public
 /target
 libtorch/
 libtorchgpu/
