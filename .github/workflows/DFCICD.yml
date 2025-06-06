@@ -56,8 +56,8 @@ jobs:
       - name: Pull model container from Artifact Registry
         run: |
           echo "Pulling model container from registry..."
-          docker pull $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/models:latest
-          docker tag $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/$REPOSITORY/models:latest models:latest
+          docker pull $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest
+          docker tag $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest models:latest
           echo "Model container pulled successfully!"
 
       - name: Build main application Docker image
