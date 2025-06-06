@@ -53,12 +53,29 @@ pub struct PreprocessingConfig {
 
 impl AugmentationConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let manifest_dir =
-            std::env::var("CARGO_MANIFEST_DIR").map_err(|_| "Failed to get manifest directory")?;
-        let config_path = format!("{}/../config/augmentations.yaml", manifest_dir);
+        let config_path = Self::get_config_path()?;
         let config_str = std::fs::read_to_string(config_path)?;
         let config: AugmentationConfig = serde_yaml::from_str(&config_str)?;
         Ok(config)
+    }
+
+    fn get_config_path() -> Result<String, Box<dyn std::error::Error>> {
+        let production_path = "/usr/src/app/config/augmentations.yaml";
+        if std::path::Path::new(production_path).exists() {
+            return Ok(production_path.to_string());
+        }
+
+        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            let dev_path = format!("{}/../config/augmentations.yaml", manifest_dir);
+            if std::path::Path::new(&dev_path).exists() {
+                return Ok(dev_path);
+            }
+        }
+
+        Err(format!(
+            "Failed to locate config file: augmentations.yaml. Tried production path: {} and development path with CARGO_MANIFEST_DIR",
+            production_path
+        ).into())
     }
 
     pub fn to_channel_augmentation(&self) -> super::augmentations::ChannelAugmentation {

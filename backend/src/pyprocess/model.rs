@@ -111,13 +111,9 @@ impl Model {
                     return Ok(());
                 }
 
-                let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").map_err(|_| {
-                    InferenceError::ModeNotSupported(
-                        "Failed to get manifest directory.".to_string(),
-                    )
-                })?;
-
-                let intermediate_model_path = format!("{}/../pyproject/models/IntermediateFusionEnsemble/best_model/IntermediateFusionEnsemble_scripted.pt", manifest_dir);
+                let intermediate_model_path = Self::get_model_path(
+                    "IntermediateFusionEnsemble/best_model/IntermediateFusionEnsemble_scripted.pt",
+                )?;
                 let model = Self::load_intermediate(&intermediate_model_path)?;
 
                 self.intermediate_model = model.intermediate_model;
@@ -133,15 +129,15 @@ impl Model {
                     return Ok(());
                 }
 
-                let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").map_err(|_| {
-                    InferenceError::ModeNotSupported(
-                        "Failed to get manifest directory.".to_string(),
-                    )
-                })?;
-
-                let resnet_path = format!("{}/../pyproject/models/ResnetClassifier/best_model/ResnetClassifier_scripted.pt", manifest_dir);
-                let densenet_path = format!("{}/../pyproject/models/DensenetClassifier/best_model/DensenetClassifier_scripted.pt", manifest_dir);
-                let regnet_path = format!("{}/../pyproject/models/RegnetClassifier/best_model/RegnetClassifier_scripted.pt", manifest_dir);
+                let resnet_path = Self::get_model_path(
+                    "ResnetClassifier/best_model/ResnetClassifier_scripted.pt",
+                )?;
+                let densenet_path = Self::get_model_path(
+                    "DensenetClassifier/best_model/DensenetClassifier_scripted.pt",
+                )?;
+                let regnet_path = Self::get_model_path(
+                    "RegnetClassifier/best_model/RegnetClassifier_scripted.pt",
+                )?;
                 let model = Self::load_late(&resnet_path, &densenet_path, &regnet_path)?;
 
                 self.resnet_model = model.resnet_model;
@@ -152,6 +148,24 @@ impl Model {
                 Ok(())
             }
         }
+    }
+
+    fn get_model_path(relative_path: &str) -> Result<String, InferenceError> {
+        let production_path = format!("/usr/src/app/pyproject/models/{}", relative_path);
+
+        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            let dev_path = format!("{}/../pyproject/models/{}", manifest_dir, relative_path);
+            log::info!("Checking development model path: {}", dev_path);
+            if std::path::Path::new(&dev_path).exists() {
+                log::info!("Found model at: {}", dev_path);
+                return Ok(dev_path);
+            }
+        }
+
+        Err(InferenceError::ModeNotSupported(format!(
+            "Failed to locate model file: {}. Tried production path: {}",
+            relative_path, production_path
+        )))
     }
 
     pub fn inference(

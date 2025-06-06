@@ -27,4 +27,5 @@ pub struct InferenceResponse {
     pub class_labels: Vec<String>,
     pub is_ai: bool,
     pub confidence: f32,
+    pub image_hash: Option<String>,
 }

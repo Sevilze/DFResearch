@@ -116,6 +116,7 @@ impl InferenceCacheEntry {
             class_labels: vec!["AI Generated".into(), "Human Created".into()],
             is_ai: self.is_ai,
             confidence: self.confidence,
+            image_hash: Some(self.image_hash.clone()),
         }
     }
 }

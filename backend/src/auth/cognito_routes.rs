@@ -65,8 +65,10 @@ pub async fn cognito_auth_callback(
             .unwrap_or("Unknown error");
         error!("OAuth error received: {} - {}", error, error_desc);
 
+        let base_url = std::env::var("BASE_URL").unwrap().to_string();
         let frontend_error_url = format!(
-            "http://localhost:8081/?error={}&error_description={}",
+            "{}/?error={}&error_description={}",
+            base_url,
             urlencoding::encode(error),
             urlencoding::encode(error_desc)
         );
@@ -218,7 +220,8 @@ pub async fn cognito_auth_callback(
     );
 
     // Redirect to frontend with token as URL parameter
-    let frontend_url = format!("http://localhost:8081/?token={}", jwt_token);
+    let base_url = std::env::var("BASE_URL").unwrap().to_string();
+    let frontend_url = format!("{}/?token={}", base_url, jwt_token);
 
     Ok(HttpResponse::Found()
         .append_header(("Location", frontend_url))
