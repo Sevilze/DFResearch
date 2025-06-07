@@ -37,6 +37,14 @@ pub struct Model {
     pub auth_token: Option<String>,
     pub completed_requests: usize,
     pub batch_processing: bool,
+    pub inference_status: HashMap<u64, InferenceStatus>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum InferenceStatus {
+    None,
+    Processing,
+    Completed,
 }
 
 #[derive(Clone)]
@@ -71,6 +79,7 @@ pub enum Msg {
     SetAuthToken(Option<String>),
     IncrementCompletedRequests,
     StartBatchProcessing(usize),
+    SetInferenceStatus(u64, InferenceStatus),
 }
 
 impl Model {
@@ -167,6 +176,7 @@ impl Component for Model {
             auth_token: None,
             completed_requests: 0,
             batch_processing: false,
+            inference_status: HashMap::new(),
         };
 
         let link = ctx.link().clone();
@@ -251,6 +261,10 @@ impl Component for Model {
                 self.completed_requests = 0;
                 self.future_requests = total;
                 self.loading = true;
+                true
+            }
+            Msg::SetInferenceStatus(file_id, status) => {
+                self.inference_status.insert(file_id, status);
                 true
             }
         }

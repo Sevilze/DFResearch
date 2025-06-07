@@ -1,0 +1,1 @@
+[![Build and Deploy to Google Cloud Run](https://github.com/Sevilze/DFResearch/actions/workflows/DFCICD.yml/badge.svg)](https://github.com/Sevilze/DFResearch/actions/workflows/DFCICD.yml)

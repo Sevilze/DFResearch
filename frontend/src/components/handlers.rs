@@ -1,4 +1,4 @@
-use super::super::{FileData, Model, Msg};
+use super::super::{FileData, Model, Msg, InferenceStatus};
 use super::utils::generate_id;
 use gloo_file::{File as GlooFile, ObjectUrl};
 use gloo_net::http::Request;
@@ -13,7 +13,6 @@ use web_sys::{
 };
 use yew::prelude::*;
 
-// No changes in this function
 pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<GlooFile>) -> bool {
     let current_count = model.files.len();
     let available_slots = (15usize).saturating_sub(current_count);
@@ -54,7 +53,6 @@ pub fn handle_files_added(model: &mut Model, ctx: &Context<Model>, files: Vec<Gl
     true
 }
 
-// No changes in this function
 pub fn handle_add_preview(model: &mut Model, id: u64, url: ObjectUrl) -> bool {
     if let Some(file_data) = model.files.get_mut(&id) {
         file_data.preview_url = Some(url);
@@ -64,7 +62,6 @@ pub fn handle_add_preview(model: &mut Model, id: u64, url: ObjectUrl) -> bool {
     }
 }
 
-// No changes in this function
 pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     if let Some(removed_file) = model.files.remove(&id) {
         // If this is a cached file, delete it from the backend
@@ -83,6 +80,7 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
 
         drop(removed_file);
         model.results.remove(&id);
+        model.inference_status.remove(&id);
 
         if model.selected_file_id == Some(id) {
             model.selected_file_id = None;
@@ -102,7 +100,6 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     }
 }
 
-// No changes in this function
 pub fn inference_request_wrapper(ctx: &Context<Model>, files: Vec<FileData>, mode: ProcessingMode) {
     let link = ctx.link().clone();
 
@@ -117,7 +114,6 @@ pub fn inference_request_wrapper(ctx: &Context<Model>, files: Vec<FileData>, mod
     });
 }
 
-// No changes in this function
 async fn send_inference_request_sse(
     link: yew::html::Scope<Model>,
     files: Vec<FileData>,
@@ -127,7 +123,6 @@ async fn send_inference_request_sse(
     let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
     let form_data = FormData::new().unwrap();
 
-    // Add file IDs to track which file corresponds to which result
     let mut file_id_map = std::collections::HashMap::new();
     let mut file_counter = 1u64;
 
@@ -137,6 +132,8 @@ async fn send_inference_request_sse(
             .append_with_blob_and_filename("image", file_blob, &file_data.file.name())
             .unwrap();
         file_id_map.insert(file_counter, file_data.id);
+
+        link.send_message(Msg::SetInferenceStatus(file_data.id, InferenceStatus::Processing));
         file_counter += 1;
     }
 
@@ -166,24 +163,6 @@ async fn send_inference_request_sse(
     .await;
 }
 
-/// # Refactored `handle_streaming_request`
-/// This function now implements true asynchronous stream processing.
-///
-/// ## How it Works:
-/// 1.  **Initiate Request**: Sends the POST request to the server.
-/// 2.  **Get ReadableStream**: Instead of awaiting the full response body with `.text().await`,
-///     it immediately gets the `ReadableStream` from the response.
-/// 3.  **Read Chunks**: It enters a loop, using a `ReadableStreamDefaultReader` to read
-///     data chunks (`Uint8Array`) as soon as they are sent by the server.
-/// 4.  **Decode and Buffer**: Each chunk is decoded from UTF-8 to a string and appended to a buffer.
-///     This is crucial because a single chunk may not contain a complete SSE message.
-/// 5.  **Process Lines**: The buffer is scanned for newline characters (`\n`), which delimit
-///     SSE messages. Each complete line is processed immediately.
-/// 6.  **Immediate UI Update**: When a valid "data: ..." message is parsed, it's immediately
-///     dispatched to the Yew `Model` via `link.send_message()`, triggering an instant UI update
-///     for that specific result.
-/// 7.  **Completion**: The loop continues until the stream reports it's `done`, at which point
-///     the loading state is reset.
 async fn handle_streaming_request(
     endpoint: &str,
     form_data: FormData,
@@ -243,7 +222,7 @@ async fn handle_streaming_request(
 
                 if done_val.as_bool().unwrap_or(true) {
                     log::info!("Streaming finished.");
-                    break; // Exit loop when stream is done
+                    break;
                 }
 
                 let chunk_val = js_sys::Reflect::get(&result_obj, &"value".into()).unwrap();
@@ -255,11 +234,9 @@ async fn handle_streaming_request(
                     let line = buffer.drain(..=newline_pos).collect::<String>();
                     let line = line.trim();
 
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
-
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if data == "{\"type\": \"complete\"}" {
-                            continue; // Skip the completion signal event
+                            continue;
                         }
 
                         match serde_json::from_str::<Value>(data) {
@@ -292,7 +269,7 @@ async fn handle_streaming_request(
                                     }
                                 } else if let Some(error) = event_data.get("error") {
                                     send_error(format!("Streaming error: {}", error));
-                                    return; // Stop processing on error
+                                    return;
                                 }
                             }
                             Err(e) => log::error!("Failed to parse SSE event data: {}", e),
@@ -311,13 +288,13 @@ async fn handle_streaming_request(
     link.send_message(Msg::ResetLoadingState);
 }
 
-// No changes in this function
 pub fn handle_inference_result(
     model: &mut Model,
     file_id: u64,
     response: InferenceResponse,
 ) -> bool {
     model.results.insert(file_id, response.clone());
+    model.inference_status.insert(file_id, InferenceStatus::Completed);
 
     // Update the FileData to mark it as cached and set the image hash
     if let Some(file_data) = model.files.get_mut(&file_id) {
@@ -555,6 +532,7 @@ pub fn handle_internal_execute_clear_all(model: &mut Model) -> bool {
     model.files.clear();
     model.selected_file_id = None;
     model.results.clear();
+    model.inference_status.clear();
     model.error = None;
     true
 }
@@ -563,7 +541,7 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
     if let Some(file_id) = model.selected_file_id {
         if let Some(file_data) = model.files.get(&file_id) {
             model.results.remove(&file_id);
-
+            model.inference_status.clear();
             model.loading = true;
             model.error = None;
             model.future_requests = 1;
@@ -581,12 +559,12 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
 
 pub fn handle_analyze_all(model: &mut Model, ctx: &Context<Model>) -> bool {
     model.results.clear();
-
+    model.inference_status.clear();
     model.loading = true;
     model.error = None;
     model.future_requests = model.files.len();
-    model.batch_processing = true;  // This was missing!
-    model.completed_requests = 0;   // Reset completed requests
+    model.batch_processing = true;
+    model.completed_requests = 0;
 
     let files: Vec<_> = model.files.values().cloned().collect();
     inference_request_wrapper(ctx, files, model.processing_mode.clone());

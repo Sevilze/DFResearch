@@ -1,6 +1,6 @@
-use super::super::{FileData, Model, Msg};
+use super::super::{FileData, InferenceStatus, Model, Msg};
 use super::utils::debounce;
-use shared::ProcessingMode; // Import ProcessingMode
+use shared::ProcessingMode;
 use yew::prelude::*;
 
 pub fn render_preview_area(model: &Model, ctx: &Context<Model>) -> Html {
@@ -80,9 +80,19 @@ fn render_preview_item(ctx: &Context<Model>, model: &Model, file_data: &FileData
     let link = ctx.link();
     let is_selected = model.selected_file_id == Some(file_id);
 
+    let inference_status = model
+        .inference_status
+        .get(&file_id)
+        .unwrap_or(&InferenceStatus::None);
+    let status_class = match inference_status {
+        InferenceStatus::None => "inference-none",
+        InferenceStatus::Processing => "inference-processing",
+        InferenceStatus::Completed => "inference-completed",
+    };
+
     html! {
         <div
-            class={classes!("preview-item", is_selected.then_some("selected"))}
+            class={classes!("preview-item", is_selected.then_some("selected"), status_class)}
             key={file_id.to_string()}
             onclick={link.callback(move |_| Msg::SelectFile(file_id))}
             title={format!("Click to select for analysis: {}", file_data.file.name())}
@@ -162,7 +172,10 @@ fn render_analyze_button_content(model: &Model) -> Html {
 fn render_analyze_all_button_content(model: &Model) -> Html {
     if model.loading && model.batch_processing {
         let progress_text = if model.future_requests > 0 {
-            format!(" Analyzing... ({}/{})", model.completed_requests, model.future_requests)
+            format!(
+                " Analyzing... ({}/{})",
+                model.completed_requests, model.future_requests
+            )
         } else {
             " Analyzing...".to_string()
         };

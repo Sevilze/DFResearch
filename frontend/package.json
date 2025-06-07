@@ -3,14 +3,16 @@
   "version": "1.0.0",
   "description": "Frontend build dependencies for DFResearch",
   "scripts": {
-    "build-css": "tailwindcss -i ./src/styles.scss -o ./dist/styles.css --watch",
-    "build-css-prod": "tailwindcss -i ./src/styles.scss -o ./dist/styles.css --minify"
+    "build-css": "postcss ./src/styles.scss -o ./dist/styles.css --silent",
+    "build-css-prod": "postcss ./src/styles.scss -o ./dist/styles.css"
   },
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.7",
     "@tailwindcss/typography": "^0.5.10",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
+    "postcss-cli": "^11.0.1",
+    "postcss-scss": "^4.0.9",
     "sass": "^1.69.5",
     "tailwindcss": "^3.3.6"
   }

@@ -50,12 +50,12 @@ pub fn configure_routes(
     cfg
         // Favicon route - handle favicon requests explicitly
         .route("/favicon.ico", web::get().to(handle_favicon))
-        // Public API endpoints (no authentication required) - now with streaming
+        // Public API endpoints
         .service(
             web::scope("/public")
                 .route("/inference", web::post().to(handle_inference_public_stream)),
         )
-        // Protected API endpoints (authentication required) - unified streaming
+        // Protected API endpoints
         .service(
             web::scope("/api")
                 .wrap(auth_middleware.clone())
@@ -74,7 +74,7 @@ pub fn configure_routes(
                 )
                 .route("/cache/clear", web::delete().to(handle_clear_user_cache)),
         )
-        // Authentication routes - mixed public and protected
+        // Authentication routes
         .service(
             web::scope("/auth")
                 // Public Cognito routes (no middleware)
@@ -155,7 +155,6 @@ async fn parse_multipart_payload(
     let mut file_counter = 1u64;
 
     while let Ok(Some(mut field)) = payload.try_next().await {
-        let field_start = std::time::Instant::now();
         let content_disposition = field.content_disposition();
         let field_name = content_disposition
             .as_ref()
@@ -184,10 +183,8 @@ async fn parse_multipart_payload(
                     .unwrap_or_else(|| "uploaded_image".to_string());
 
                 let mut image_data = Vec::new();
-                let mut chunk_count = 0;
                 while let Some(chunk) = field.next().await {
                     image_data.write_all(&chunk?)?;
-                    chunk_count += 1;
                 }
 
                 if !image_data.is_empty() {

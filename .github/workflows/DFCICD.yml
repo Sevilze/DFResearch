@@ -11,7 +11,7 @@ on:
 env:
   REGION: asia-southeast2
   IMAGE_NAME: asia-southeast2-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/dfresearch
-  MODELS_IMAGE_NAME: asia-southeast2-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest
+  MODELS_IMAGE_NAME: ${{ secrets.DOCKER_REPOSITORY }}
   LIBTORCH_VERSION: "2.7.0"
 
 jobs:
@@ -37,9 +37,16 @@ jobs:
 
       - name: Set up Cloud SDK and Docker
         uses: google-github-actions/setup-gcloud@v2
+
       - name: Configure Docker to use gcloud as a credential helper
         run: gcloud auth configure-docker $REGION-docker.pkg.dev
-
+      
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -49,6 +56,7 @@ jobs:
         with:
           path: libtorch
           key: ${{ runner.os }}-libtorch-${{ env.LIBTORCH_VERSION }}
+
       - name: Download LibTorch if not cached
         if: steps.cache-libtorch.outputs.cache-hit != 'true'
         run: |
@@ -57,10 +65,10 @@ jobs:
           unzip -q libtorch-cxx11-abi-shared-with-deps-${{ env.LIBTORCH_VERSION }}+cpu.zip
           rm libtorch-cxx11-abi-shared-with-deps-${{ env.LIBTORCH_VERSION }}+cpu.zip
 
-      - name: Pull model container from Artifact Registry
+      - name: Pull model container from Docker Hub
         run: |
-          docker pull $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest
-          docker tag $REGION-docker.pkg.dev/${{ secrets.PROJECT_ID }}/${{ secrets.REPOSITORY }}/models:latest models:latest
+          docker pull ${{ env.MODELS_IMAGE_NAME }}:latest
+          docker tag ${{ env.MODELS_IMAGE_NAME }}:latest models:latest
 
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
@@ -77,8 +85,8 @@ jobs:
             CXXFLAGS=-std=c++17
             CARGO_JOBS=$(nproc)
             MODELS_IMAGE=${{ env.MODELS_IMAGE_NAME }}
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
-          cache-to: type=inline
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
 
       - name: Deploy to Cloud Run
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -88,7 +96,11 @@ jobs:
             --platform managed \
             --region $REGION \
             --allow-unauthenticated \
-            --set-env-vars="LIBTORCH=/opt/libtorch,LIBTORCH_LIB=/opt/libtorch,LD_LIBRARY_PATH=/opt/libtorch/lib,CXXFLAGS=-std=c++17,CARGO_JOBS=4,RUST_LOG=info" \
+            --set-env-vars="LIBTORCH=/opt/libtorch" \
+            --set-env-vars="LIBTORCH_LIB=/opt/libtorch" \
+            --set-env-vars="LD_LIBRARY_PATH=/opt/libtorch/lib" \
+            --set-env-vars="CXXFLAGS=-std=c++17" \
+            --set-env-vars="RUST_LOG=info" \
             --set-env-vars="AWS_REGION=${{ secrets.AWS_REGION }}" \
             --set-env-vars="AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" \
             --set-env-vars="AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
