@@ -37,7 +37,7 @@ pub fn render_results(model: &Model) -> Html {
                             <div class="meter">
                                 <div class="meter-fill" style={format!("width: {}%", confidence)}></div>
                             </div>
-                            <div class="meter-value">{format!("{:.1}%", confidence)}</div>
+                            <div class="meter-value">{format!("{:.2}%", confidence)}</div>
                         </div>
                     </div>
                     <div class="detailed-results">
@@ -56,7 +56,7 @@ pub fn render_results(model: &Model) -> Html {
                                         <div class="result-bar-container">
                                             <div class="result-bar" style={format!("width: {}%", percentage)}></div>
                                         </div>
-                                        <div class="result-value">{ format!("{:.1}%", percentage) }</div>
+                                        <div class="result-value">{ format!("{:.2}%", percentage) }</div>
                                     </div>
                                 }
                             })}

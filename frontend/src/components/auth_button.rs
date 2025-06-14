@@ -44,8 +44,6 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
 
         use_effect_with(token.clone(), move |token_opt| {
             if let Some(token) = token_opt.clone() {
-                log::info!("AuthButton: Processing token (length: {})", token.len());
-
                 // Check if this is likely an automatic re-authentication
                 let current_time = js_sys::Date::now();
                 let is_automatic = if let Some(start_time) = *login_start_time {
@@ -56,10 +54,6 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
                 };
 
                 if is_automatic {
-                    log::info!(
-                        "AuthButton: Detected automatic re-authentication (elapsed: {}ms)",
-                        current_time - login_start_time.as_ref().unwrap_or(&current_time)
-                    );
                     was_automatic_reauth.set(true);
                     auth_state.set(AuthState::Authenticating);
                 } else {
@@ -74,10 +68,6 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
                 spawn_local(async move {
                     match fetch_user_info(&token).await {
                         Ok(info) => {
-                            log::info!(
-                                "AuthButton: User info fetched successfully: {}",
-                                info.email
-                            );
                             user_info.set(Some(info));
                             auth_state.set(AuthState::Idle);
                         }
@@ -91,7 +81,6 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
                     }
                 });
             } else {
-                log::info!("AuthButton: No token provided");
                 user_info.set(None);
                 auth_state.set(AuthState::Idle);
             }
@@ -106,8 +95,6 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
             let start_time = js_sys::Date::now();
             login_start_time.set(Some(start_time));
             auth_state.set(AuthState::Redirecting);
-
-            log::info!("AuthButton: Starting login process at {}", start_time);
 
             let window = web_sys::window().unwrap();
             let base_url = window.location().origin().unwrap().to_string();
@@ -217,27 +204,19 @@ pub fn auth_button(props: &AuthButtonProps) -> Html {
 }
 
 async fn fetch_user_info(token: &str) -> Result<UserInfo, Box<dyn std::error::Error>> {
-    log::info!("Attempting to fetch user info with token");
-
     let response = Request::get("/auth/me")
         .header("Authorization", &format!("Bearer {}", token))
         .send()
         .await;
 
     match response {
-        Ok(resp) if resp.ok() => {
-            log::info!("/auth/me request successful");
-            match resp.json::<UserInfo>().await {
-                Ok(user_info) => {
-                    log::info!("User info parsed successfully: {}", user_info.email);
-                    Ok(user_info)
-                }
-                Err(e) => {
-                    log::error!("Failed to parse user info JSON: {:?}", e);
-                    Err(format!("Failed to parse user info: {:?}", e).into())
-                }
+        Ok(resp) if resp.ok() => match resp.json::<UserInfo>().await {
+            Ok(user_info) => Ok(user_info),
+            Err(e) => {
+                log::error!("Failed to parse user info JSON: {:?}", e);
+                Err(format!("Failed to parse user info: {:?}", e).into())
             }
-        }
+        },
         Ok(resp) => {
             let status = resp.status();
             let error_text = resp.text().await.unwrap_or_default();

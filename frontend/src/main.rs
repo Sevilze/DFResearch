@@ -96,16 +96,10 @@ impl Model {
 
         if search.is_empty() {
             let stored_token: Option<String> = LocalStorage::get("auth_token").ok();
-            if let Some(ref token) = stored_token {
-                log::info!(
-                    "Found stored token in localStorage (length: {})",
-                    token.len()
-                );
+            if let Some(ref _token) = stored_token {
                 // Update component state with stored token
                 ctx.link()
                     .send_message(Msg::SetAuthToken(stored_token.clone()));
-            } else {
-                log::info!("No token found in localStorage");
             }
             return;
         }
@@ -117,10 +111,8 @@ impl Model {
         let token = url_params.get("token");
 
         if let Some(ref token_str) = token {
-            log::info!("Found token in URL (length: {})", token_str.len());
-
             match LocalStorage::set("auth_token", token_str) {
-                Ok(_) => log::info!("Token stored in localStorage successfully"),
+                Ok(_) => (),
                 Err(e) => log::error!("Failed to store token in localStorage: {:?}", e),
             }
 
@@ -135,13 +127,9 @@ impl Model {
                 Some(&new_url),
             );
 
-            log::info!("URL cleaned, token extracted and stored");
-
             // Update component state with new token
             ctx.link().send_message(Msg::SetAuthToken(token.clone()));
         } else {
-            log::info!("No token parameter found in URL");
-
             let stored_token: Option<String> = LocalStorage::get("auth_token").ok();
             if stored_token.is_some() {
                 // Update component state with stored token
@@ -241,8 +229,7 @@ impl Component for Model {
                 self.auth_token = token;
 
                 if now_has_token && (had_no_token || self.files.is_empty()) {
-                    log::info!("Auth token set, triggering session restoration");
-                    crate::components::handlers::fetch_and_restore_session(ctx);
+                    fetch_and_restore_session(ctx, self.processing_mode.clone());
                 }
 
                 true
@@ -271,12 +258,6 @@ impl Component for Model {
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
-        if let Some(ref token) = self.auth_token {
-            log::debug!("Main view: Auth token present (length: {})", token.len());
-        } else {
-            log::debug!("Main view: No auth token");
-        }
-
         let on_token_change = {
             let link = ctx.link().clone();
             Callback::from(move |token: Option<String>| {
@@ -311,6 +292,5 @@ impl Component for Model {
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::new(log::Level::Info));
-    log::info!("App starting...");
     yew::Renderer::<Model>::new().render();
 }

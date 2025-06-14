@@ -93,11 +93,12 @@ impl InferenceCacheEntry {
         confidence: f32,
     ) -> Self {
         let now = chrono::Utc::now();
+        let mode_str = format!("{:?}", processing_mode);
         Self {
             id: Uuid::new_v4(),
             user_id,
             image_hash,
-            processing_mode: format!("{:?}", processing_mode),
+            processing_mode: mode_str,
             predictions: serde_json::json!(predictions),
             is_ai,
             confidence,

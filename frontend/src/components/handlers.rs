@@ -1,7 +1,7 @@
-use super::super::{FileData, Model, Msg, InferenceStatus};
+use super::super::{FileData, InferenceStatus, Model, Msg};
 use super::utils::generate_id;
 use gloo_file::{File as GlooFile, ObjectUrl};
-use gloo_net::http::Request;
+use gloo_net::http::{Request, RequestBuilder};
 use gloo_storage::{LocalStorage, Storage};
 use gloo_timers::callback::Timeout;
 use serde_json::Value;
@@ -71,8 +71,6 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
                 spawn_local(async move {
                     if let Err(e) = delete_cached_image(&image_hash).await {
                         log::error!("Failed to delete cached image {}: {:?}", image_hash, e);
-                    } else {
-                        log::info!("Successfully deleted cached image: {}", image_hash);
                     }
                 });
             }
@@ -100,6 +98,24 @@ pub fn handle_remove_file(model: &mut Model, id: u64) -> bool {
     }
 }
 
+fn get_auth_token() -> Option<String> {
+    LocalStorage::get("auth_token").ok()
+}
+
+// Build an authenticated request builder with the given method and endpoint
+fn build_authenticated_request(method: &str, endpoint: &str) -> Option<RequestBuilder> {
+    let auth_token = get_auth_token()?;
+
+    let request_builder = match method {
+        "GET" => Request::get(endpoint),
+        "POST" => Request::post(endpoint),
+        "DELETE" => Request::delete(endpoint),
+        _ => return None,
+    };
+
+    Some(request_builder.header("Authorization", &format!("Bearer {}", auth_token)))
+}
+
 pub fn inference_request_wrapper(ctx: &Context<Model>, files: Vec<FileData>, mode: ProcessingMode) {
     let link = ctx.link().clone();
 
@@ -120,20 +136,69 @@ async fn send_inference_request_sse(
     mode: ProcessingMode,
     send_error: impl Fn(String) + 'static,
 ) {
-    let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-    let form_data = FormData::new().unwrap();
+    let auth_token = get_auth_token();
 
+    match prepare_inference_request(&files, mode, &link) {
+        Ok((form_data, file_id_map)) => {
+            let endpoint = if auth_token.is_some() {
+                "/api/inference"
+            } else {
+                "/public/inference"
+            };
+
+            handle_streaming_request(
+                endpoint,
+                form_data,
+                auth_token,
+                file_id_map,
+                link,
+                send_error,
+            )
+            .await;
+        }
+        Err(error_msg) => {
+            send_error(error_msg);
+        }
+    }
+}
+
+// Prepare the form data and file ID mapping for inference request
+fn prepare_inference_request(
+    files: &[FileData],
+    mode: ProcessingMode,
+    link: &yew::html::Scope<Model>,
+) -> Result<(FormData, std::collections::HashMap<u64, u64>), String> {
+    let form_data = FormData::new().unwrap();
     let mut file_id_map = std::collections::HashMap::new();
     let mut file_counter = 1u64;
 
-    for file_data in &files {
-        let file_blob = file_data.file.as_ref();
-        form_data
-            .append_with_blob_and_filename("image", file_blob, &file_data.file.name())
-            .unwrap();
-        file_id_map.insert(file_counter, file_data.id);
+    for file_data in files {
+        if file_data.is_cached {
+            if let Some(image_hash) = &file_data.image_hash {
+                form_data
+                    .append_with_str("cached_image_hash", image_hash)
+                    .unwrap();
+                form_data
+                    .append_with_str("cached_filename", &file_data.file.name())
+                    .unwrap();
+            } else {
+                return Err(format!(
+                    "Cached file missing image hash: {}",
+                    file_data.file.name()
+                ));
+            }
+        } else {
+            let file_blob = file_data.file.as_ref();
+            form_data
+                .append_with_blob_and_filename("image", file_blob, &file_data.file.name())
+                .unwrap();
+        }
 
-        link.send_message(Msg::SetInferenceStatus(file_data.id, InferenceStatus::Processing));
+        file_id_map.insert(file_counter, file_data.id);
+        link.send_message(Msg::SetInferenceStatus(
+            file_data.id,
+            InferenceStatus::Processing,
+        ));
         file_counter += 1;
     }
 
@@ -143,24 +208,7 @@ async fn send_inference_request_sse(
     };
     form_data.append_with_str("mode", mode_str).unwrap();
 
-    // Determine which endpoint to use based on authentication status
-    let endpoint = if auth_token.is_some() {
-        log::info!("User authenticated - using authenticated streaming endpoint with caching");
-        "/api/inference"
-    } else {
-        log::info!("User not authenticated - using public streaming endpoint (no caching)");
-        "/public/inference"
-    };
-
-    handle_streaming_request(
-        endpoint,
-        form_data,
-        auth_token,
-        file_id_map,
-        link,
-        send_error,
-    )
-    .await;
+    Ok((form_data, file_id_map))
 }
 
 async fn handle_streaming_request(
@@ -171,45 +219,62 @@ async fn handle_streaming_request(
     link: yew::html::Scope<Model>,
     send_error: impl Fn(String) + 'static,
 ) {
-    let mut request_builder = Request::post(endpoint);
-    if let Some(token) = auth_token {
-        request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
-    }
-
-    let request = match request_builder.body(form_data) {
+    let request = match build_streaming_request(endpoint, form_data, auth_token) {
         Ok(req) => req,
         Err(e) => {
-            send_error(format!("Failed to build streaming request: {}", e));
+            send_error(e);
             return;
         }
     };
 
     let response = match request.send().await {
-        Ok(resp) => resp,
+        Ok(resp) if resp.ok() => resp,
+        Ok(resp) => {
+            let error_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown server error".to_string());
+            send_error(format!("Server error in streaming: {}", error_text));
+            return;
+        }
         Err(e) => {
             send_error(format!("Network error in streaming request: {}", e));
             return;
         }
     };
 
-    if !response.ok() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown server error".to_string());
-        send_error(format!("Server error in streaming: {}", error_text));
+    let Some(body) = response.body() else {
+        send_error("Response body is missing.".to_string());
         return;
-    }
-
-    // Get the response body as a readable stream
-    let body = match response.body() {
-        Some(body) => body,
-        None => {
-            send_error("Response body is missing.".to_string());
-            return;
-        }
     };
 
+    process_streaming_response(body, file_id_map, link, send_error).await;
+}
+
+// Build the streaming request with proper headers
+fn build_streaming_request(
+    endpoint: &str,
+    form_data: FormData,
+    auth_token: Option<String>,
+) -> Result<Request, String> {
+    let mut request_builder = Request::post(endpoint);
+
+    if let Some(token) = auth_token {
+        request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
+    }
+
+    request_builder
+        .body(form_data)
+        .map_err(|e| format!("Failed to build streaming request: {}", e))
+}
+
+// Process the streaming response and handle SSE events
+async fn process_streaming_response(
+    body: web_sys::ReadableStream,
+    file_id_map: std::collections::HashMap<u64, u64>,
+    link: yew::html::Scope<Model>,
+    send_error: impl Fn(String) + 'static,
+) {
     let reader: ReadableStreamDefaultReader = body.get_reader().dyn_into().unwrap();
     let decoder = TextDecoder::new().unwrap();
     let mut buffer = String::new();
@@ -219,9 +284,7 @@ async fn handle_streaming_request(
             Ok(result) => {
                 let result_obj: js_sys::Object = result.dyn_into().unwrap();
                 let done_val = js_sys::Reflect::get(&result_obj, &"done".into()).unwrap();
-
                 if done_val.as_bool().unwrap_or(true) {
-                    log::info!("Streaming finished.");
                     break;
                 }
 
@@ -229,53 +292,7 @@ async fn handle_streaming_request(
                 let chunk_uint8: js_sys::Uint8Array = chunk_val.dyn_into().unwrap();
                 buffer.push_str(&decoder.decode_with_buffer_source(&chunk_uint8).unwrap());
 
-                // Process all complete lines in the buffer
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer.drain(..=newline_pos).collect::<String>();
-                    let line = line.trim();
-
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "{\"type\": \"complete\"}" {
-                            continue;
-                        }
-
-                        match serde_json::from_str::<Value>(data) {
-                            Ok(event_data) => {
-                                if let (Some(file_id_backend), Some(inference_data)) = (
-                                    event_data.get("file_id").and_then(|v| v.as_u64()),
-                                    event_data.get("inference"),
-                                ) {
-                                    if let Some(&frontend_file_id) =
-                                        file_id_map.get(&file_id_backend)
-                                    {
-                                        match serde_json::from_value::<InferenceResponse>(
-                                            inference_data.clone(),
-                                        ) {
-                                            Ok(response) => {
-                                                log::info!(
-                                                    "Received and processing result for file ID: {}",
-                                                    frontend_file_id
-                                                );
-                                                link.send_message(Msg::InferenceResult(
-                                                    frontend_file_id,
-                                                    response,
-                                                ));
-                                            }
-                                            Err(e) => log::error!(
-                                                "Failed to parse streaming inference response: {}",
-                                                e
-                                            ),
-                                        }
-                                    }
-                                } else if let Some(error) = event_data.get("error") {
-                                    send_error(format!("Streaming error: {}", error));
-                                    return;
-                                }
-                            }
-                            Err(e) => log::error!("Failed to parse SSE event data: {}", e),
-                        }
-                    }
-                }
+                process_buffer_lines(&mut buffer, &file_id_map, &link, &send_error);
             }
             Err(e) => {
                 send_error(format!("Error reading from stream: {:?}", e));
@@ -284,8 +301,67 @@ async fn handle_streaming_request(
         }
     }
 
-    // All results have been processed, reset the main loading state
     link.send_message(Msg::ResetLoadingState);
+}
+
+// Process complete lines in the buffer and handle SSE events
+fn process_buffer_lines(
+    buffer: &mut String,
+    file_id_map: &std::collections::HashMap<u64, u64>,
+    link: &yew::html::Scope<Model>,
+    send_error: &impl Fn(String),
+) {
+    while let Some(newline_pos) = buffer.find('\n') {
+        let line = buffer.drain(..=newline_pos).collect::<String>();
+        let line = line.trim();
+
+        if let Some(data) = line.strip_prefix("data: ") {
+            if data == "{\"type\": \"complete\"}" {
+                continue;
+            }
+
+            match serde_json::from_str::<Value>(data) {
+                Ok(event_data) => {
+                    handle_sse_event(event_data, file_id_map, link, send_error);
+                }
+                Err(e) => log::error!("Failed to parse SSE event data: {}", e),
+            }
+        }
+    }
+}
+
+// Handle individual SSE events
+fn handle_sse_event(
+    event_data: Value,
+    file_id_map: &std::collections::HashMap<u64, u64>,
+    link: &yew::html::Scope<Model>,
+    send_error: &impl Fn(String),
+) {
+    if let Some(error) = event_data.get("error") {
+        send_error(format!("Streaming error: {}", error));
+        return;
+    }
+
+    let Some(file_id_backend) = event_data.get("file_id").and_then(|v| v.as_u64()) else {
+        return;
+    };
+
+    let Some(inference_data) = event_data.get("inference") else {
+        return;
+    };
+
+    let Some(&frontend_file_id) = file_id_map.get(&file_id_backend) else {
+        return;
+    };
+
+    match serde_json::from_value::<InferenceResponse>(inference_data.clone()) {
+        Ok(response) => {
+            link.send_message(Msg::InferenceResult(frontend_file_id, response));
+        }
+        Err(e) => {
+            log::error!("Failed to parse streaming inference response: {}", e);
+        }
+    }
 }
 
 pub fn handle_inference_result(
@@ -294,7 +370,9 @@ pub fn handle_inference_result(
     response: InferenceResponse,
 ) -> bool {
     model.results.insert(file_id, response.clone());
-    model.inference_status.insert(file_id, InferenceStatus::Completed);
+    model
+        .inference_status
+        .insert(file_id, InferenceStatus::Completed);
 
     // Update the FileData to mark it as cached and set the image hash
     if let Some(file_data) = model.files.get_mut(&file_id) {
@@ -302,11 +380,6 @@ pub fn handle_inference_result(
             // This image was just processed and cached
             file_data.is_cached = true;
             file_data.image_hash = response.image_hash.clone();
-            log::info!(
-                "Marked file {} as cached with hash: {:?}",
-                file_id,
-                file_data.image_hash
-            );
         }
     }
 
@@ -520,8 +593,6 @@ pub fn handle_internal_execute_clear_all(model: &mut Model) -> bool {
         spawn_local(async move {
             if let Err(e) = clear_user_cache().await {
                 log::error!("Failed to clear user cache: {:?}", e);
-            } else {
-                log::info!("Successfully cleared user cache");
             }
         });
     }
@@ -541,7 +612,8 @@ pub fn handle_analyze_selected(model: &mut Model, ctx: &Context<Model>) -> bool 
     if let Some(file_id) = model.selected_file_id {
         if let Some(file_data) = model.files.get(&file_id) {
             model.results.remove(&file_id);
-            model.inference_status.clear();
+            // Only clear the status for the file being analyzed, not all files
+            model.inference_status.remove(&file_id);
             model.loading = true;
             model.error = None;
             model.future_requests = 1;
@@ -577,124 +649,136 @@ pub fn handle_set_processing_mode(
     _ctx: &Context<Model>,
     mode: ProcessingMode,
 ) -> bool {
-    model.processing_mode = mode.clone();
-    true
+    if model.processing_mode != mode {
+        model.processing_mode = mode;
+
+        true
+    } else {
+        false
+    }
 }
 
-pub fn fetch_and_restore_session(ctx: &Context<Model>) {
+pub fn fetch_and_restore_session(ctx: &Context<Model>, _current_processing_mode: ProcessingMode) {
     let link = ctx.link().clone();
 
-    wasm_bindgen_futures::spawn_local(async move {
-        let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-        if auth_token.is_none() {
-            log::info!("🔍 No auth token found, skipping session restoration");
+    spawn_local(async move {
+        if get_auth_token().is_none() {
             return;
         }
 
-        log::info!("Fetching cached session data...");
-        let mut request_builder = Request::get("/api/cache/history");
-
-        // Add authorization header
-        if let Some(token) = auth_token {
-            request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
-        }
-
-        let response = match request_builder.send().await {
-            Ok(resp) if resp.ok() => resp,
-            Ok(resp) => {
-                let status = resp.status();
-                log::warn!("Failed to fetch session data: {}", status);
-                return;
+        match fetch_session_data().await {
+            Ok(session_data) => {
+                restore_cached_files(&link, &session_data).await;
+                restore_inference_results(&link, &session_data);
             }
             Err(e) => {
-                log::warn!("Network error fetching session data: {}", e);
-                return;
-            }
-        };
-
-        let session_data: Value = match response.json().await {
-            Ok(data) => data,
-            Err(e) => {
-                log::error!("Failed to parse session data: {}", e);
-                return;
-            }
-        };
-
-        log::info!("Session data received, restoring...");
-
-        if let Some(images_obj) = session_data.get("images").and_then(|v| v.as_object()) {
-            log::info!("Processing {} cached images", images_obj.len());
-            for (file_id_str, image_data) in images_obj {
-                if let Ok(file_id) = file_id_str.parse::<u64>() {
-                    if let Some(preview_url) =
-                        image_data.get("preview_url").and_then(|v| v.as_str())
-                    {
-                        // Create a mock file for the cached image
-                        let file_name = image_data
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("cached_image");
-                        let file_size =
-                            image_data.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-
-                        // Create FileData and then set the preview URL
-                        let image_hash = image_data
-                            .get("image_hash")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let file_data = FileData {
-                            id: file_id,
-                            file: create_mock_file(file_name, file_size),
-                            preview_url: None,
-                            image_hash,
-                            is_cached: true,
-                        };
-
-                        log::info!("Restoring cached file: {} ({})", file_id, file_name);
-                        link.send_message(Msg::RestoreCachedFile(file_id, file_data.clone()));
-
-                        // Fetch and set the preview URL
-                        let link_clone = link.clone();
-                        let preview_url_owned = preview_url.to_string();
-                        spawn_local(async move {
-                            // Create a blob URL from the cached image endpoint
-                            match fetch_cached_image_as_blob(&preview_url_owned).await {
-                                Ok(blob_url) => {
-                                    log::info!("Created blob URL for cached image: {}", file_id);
-                                    link_clone.send_message(Msg::AddPreview(file_id, blob_url));
-                                }
-                                Err(e) => {
-                                    log::error!(
-                                        "Failed to create blob URL for cached image {}: {:?}",
-                                        file_id,
-                                        e
-                                    );
-                                }
-                            }
-                        });
-                    }
-                }
+                log::warn!("Failed to restore session: {}", e);
             }
         }
-
-        if let Some(results_obj) = session_data.get("results").and_then(|v| v.as_object()) {
-            for (file_id_str, result_data) in results_obj {
-                if let Ok(file_id) = file_id_str.parse::<u64>() {
-                    if let Ok(inference_response) =
-                        serde_json::from_value::<InferenceResponse>(result_data.clone())
-                    {
-                        link.send_message(Msg::InferenceResult(file_id, inference_response));
-                    }
-                }
-            }
-        }
-
-        log::info!("Session restoration completed");
     });
 }
-// Helper function to create a mock file for cached images
+
+// Fetch session data from the backend
+async fn fetch_session_data() -> Result<Value, Box<dyn std::error::Error>> {
+    let request_builder = build_authenticated_request("GET", "/api/cache/history")
+        .ok_or("No authentication token available")?;
+
+    let response = request_builder.send().await?;
+    if !response.ok() {
+        return Err(format!("Failed to fetch session data: {}", response.status()).into());
+    }
+
+    let session_data: Value = response.json().await?;
+    Ok(session_data)
+}
+
+// Restore cached files from session data
+async fn restore_cached_files(link: &yew::html::Scope<Model>, session_data: &Value) {
+    let Some(images_obj) = session_data.get("images").and_then(|v| v.as_object()) else {
+        return;
+    };
+
+    for (file_id_str, image_data) in images_obj {
+        let Ok(file_id) = file_id_str.parse::<u64>() else {
+            continue;
+        };
+
+        let Some(preview_url) = image_data.get("preview_url").and_then(|v| v.as_str()) else {
+            continue;
+        };
+
+        let file_data = create_cached_file_data(file_id, image_data);
+        link.send_message(Msg::RestoreCachedFile(file_id, file_data));
+
+        // Fetch and set the preview URL asynchronously
+        let link_clone = link.clone();
+        let preview_url_owned = preview_url.to_string();
+        spawn_local(async move {
+            match fetch_cached_image_as_blob(&preview_url_owned).await {
+                Ok(blob_url) => {
+                    link_clone.send_message(Msg::AddPreview(file_id, blob_url));
+                }
+                Err(e) => {
+                    log::error!(
+                        "Failed to create blob URL for cached image {}: {:?}",
+                        file_id,
+                        e
+                    );
+                }
+            }
+        });
+    }
+}
+
+// Create FileData for a cached image from session data
+fn create_cached_file_data(file_id: u64, image_data: &Value) -> FileData {
+    let file_name = image_data
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("cached_image");
+    let file_size = image_data.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let image_hash = image_data
+        .get("image_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    FileData {
+        id: file_id,
+        file: create_mock_file(file_name, file_size),
+        preview_url: None,
+        image_hash,
+        is_cached: true,
+    }
+}
+
+// Restore inference results from session data
+fn restore_inference_results(link: &yew::html::Scope<Model>, session_data: &Value) {
+    let Some(results_obj) = session_data.get("results").and_then(|v| v.as_object()) else {
+        return;
+    };
+
+    for (file_id_str, results_by_mode) in results_obj {
+        let Ok(file_id) = file_id_str.parse::<u64>() else {
+            continue;
+        };
+
+        let Some(results_map) = results_by_mode.as_object() else {
+            continue;
+        };
+
+        // The backend will handle mode-specific caching during reanalysis
+        if let Some((_, result_data)) = results_map.iter().next() {
+            if let Ok(inference_response) =
+                serde_json::from_value::<InferenceResponse>(result_data.clone())
+            {
+                link.send_message(Msg::InferenceResult(file_id, inference_response));
+            }
+        }
+    }
+}
+
+// Create a mock file for cached images
 fn create_mock_file(name: &str, size: u32) -> GlooFile {
-    // Create a minimal blob to represent the cached file
     let array = js_sys::Uint8Array::new_with_length(size);
     let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array)).unwrap();
 
@@ -710,19 +794,12 @@ fn create_mock_file(name: &str, size: u32) -> GlooFile {
     GlooFile::from(file)
 }
 
-// Helper function to fetch cached image and create a blob URL
+// Fetch cached image and create a blob URL
 async fn fetch_cached_image_as_blob(
     preview_url: &str,
 ) -> Result<ObjectUrl, Box<dyn std::error::Error>> {
-    let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-    if auth_token.is_none() {
-        return Err("No auth token available".into());
-    }
-
-    let mut request_builder = Request::get(preview_url);
-    if let Some(token) = auth_token {
-        request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
-    }
+    let request_builder = build_authenticated_request("GET", preview_url)
+        .ok_or("No authentication token available")?;
 
     let response = request_builder.send().await?;
     if !response.ok() {
@@ -736,21 +813,13 @@ async fn fetch_cached_image_as_blob(
     let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&uint8_array))
         .map_err(|e| format!("Failed to create blob: {:?}", e))?;
 
-    let object_url = ObjectUrl::from(blob);
-    Ok(object_url)
+    Ok(ObjectUrl::from(blob))
 }
 
-// Helper function to delete a cached image
 async fn delete_cached_image(image_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-    if auth_token.is_none() {
-        return Err("No auth token available".into());
-    }
-
-    let mut request_builder = Request::delete(&format!("/api/cache/image/{}", image_hash));
-    if let Some(token) = auth_token {
-        request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
-    }
+    let endpoint = format!("/api/cache/image/{}", image_hash);
+    let request_builder = build_authenticated_request("DELETE", &endpoint)
+        .ok_or("No authentication token available")?;
 
     let response = request_builder.send().await?;
     if !response.ok() {
@@ -760,17 +829,9 @@ async fn delete_cached_image(image_hash: &str) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-// Helper function to clear all cached data
 async fn clear_user_cache() -> Result<(), Box<dyn std::error::Error>> {
-    let auth_token: Option<String> = LocalStorage::get("auth_token").ok();
-    if auth_token.is_none() {
-        return Err("No auth token available".into());
-    }
-
-    let mut request_builder = Request::delete("/api/cache/clear");
-    if let Some(token) = auth_token {
-        request_builder = request_builder.header("Authorization", &format!("Bearer {}", token));
-    }
+    let request_builder = build_authenticated_request("DELETE", "/api/cache/clear")
+        .ok_or("No authentication token available")?;
 
     let response = request_builder.send().await?;
     if !response.ok() {

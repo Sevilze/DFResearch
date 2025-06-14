@@ -45,7 +45,7 @@ impl DynamoDbRepository {
 
     pub async fn create_user(&self, user: &User) -> Result<(), RepositoryError> {
         log::info!(
-            "🔄 Creating user in DynamoDB table '{}': {}",
+            "Creating user in DynamoDB table '{}': {}",
             self.users_table,
             user.email
         );
@@ -140,7 +140,7 @@ impl DynamoDbRepository {
             .await
         {
             Ok(_) => {
-                log::info!("✅ Successfully created user in DynamoDB: {}", user.email);
+                log::info!("Successfully created user in DynamoDB: {}", user.email);
                 Ok(())
             }
             Err(e) => {
@@ -514,22 +514,36 @@ impl DynamoDbRepository {
     ) -> Result<Option<InferenceCacheEntry>, RepositoryError> {
         let mode_str = format!("{:?}", processing_mode);
 
+        log::info!(
+            "Looking for cached inference: user_id={}, image_hash={}, processing_mode={}",
+            user_id,
+            image_hash,
+            mode_str
+        );
+
         let result = self.client
             .scan()
             .table_name(&self.inference_table)
             .filter_expression("user_id = :user_id AND image_hash = :image_hash AND processing_mode = :processing_mode")
             .expression_attribute_values(":user_id", AttributeValue::S(user_id.to_string()))
             .expression_attribute_values(":image_hash", AttributeValue::S(image_hash.to_string()))
-            .expression_attribute_values(":processing_mode", AttributeValue::S(mode_str))
+            .expression_attribute_values(":processing_mode", AttributeValue::S(mode_str.clone()))
             .send()
             .await
             .map_err(|e| RepositoryError::DynamoDb(e.to_string()))?;
 
         if let Some(items) = result.items {
+            log::info!("Found {} items in cache lookup", items.len());
             if let Some(item) = items.into_iter().next() {
-                return Ok(Some(self.parse_inference_cache_from_item(item)?));
+                let cached_entry = self.parse_inference_cache_from_item(item)?;
+                log::info!(
+                    "Cache hit, found entry with mode: {}",
+                    cached_entry.processing_mode
+                );
+                return Ok(Some(cached_entry));
             }
         }
+        log::info!("Cache miss - no matching items found");
         Ok(None)
     }
 

@@ -1,7 +1,6 @@
+use crate::db::dynamodb_repository::DynamoDbRepository;
 use actix_web::{web, HttpResponse, Result};
 use log::error;
-
-use crate::db::dynamodb_repository::DynamoDbRepository;
 
 use super::middleware::AuthenticatedUser;
 use super::models::AuthUser;

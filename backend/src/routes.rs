@@ -15,6 +15,19 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
+enum ImageSource {
+    Upload {
+        data: Vec<u8>,
+        filename: String,
+        mime_type: String,
+    },
+    Cached {
+        hash: String,
+        filename: String,
+    },
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
@@ -149,10 +162,12 @@ async fn spa_handler() -> Result<actix_files::NamedFile, actix_web::Error> {
 
 async fn parse_multipart_payload(
     mut payload: Multipart,
-) -> Result<(Vec<(Vec<u8>, String, String, u64)>, ProcessingMode), Error> {
+) -> Result<(Vec<(ImageSource, u64)>, ProcessingMode), Error> {
     let mut images_with_metadata = Vec::new();
     let mut processing_mode = ProcessingMode::IntermediateFusionEnsemble;
     let mut file_counter = 1u64;
+    let mut cached_hashes = Vec::new();
+    let mut cached_filenames = Vec::new();
 
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_disposition = field.content_disposition();
@@ -168,11 +183,11 @@ async fn parse_multipart_payload(
                     mode_data.write_all(&chunk?)?;
                 }
                 if let Ok(mode_str) = String::from_utf8(mode_data) {
-                    processing_mode = match mode_str.trim() {
+                    let mode_str_trimmed = mode_str.trim();
+                    processing_mode = match mode_str_trimmed {
                         "late_fusion" => ProcessingMode::LateFusionEnsemble,
                         _ => ProcessingMode::IntermediateFusionEnsemble,
                     };
-                    info!("Processing mode set to: {:?}", processing_mode);
                 }
             }
             "image" => {
@@ -199,14 +214,44 @@ async fn parse_multipart_payload(
                     }
                     .to_string();
 
-                    images_with_metadata.push((image_data, filename, mime_type, file_counter));
+                    let image_source = ImageSource::Upload {
+                        data: image_data,
+                        filename,
+                        mime_type,
+                    };
+                    images_with_metadata.push((image_source, file_counter));
                     file_counter += 1;
+                }
+            }
+            "cached_image_hash" => {
+                let mut hash_data = Vec::new();
+                while let Some(chunk) = field.next().await {
+                    hash_data.write_all(&chunk?)?;
+                }
+                if let Ok(hash_str) = String::from_utf8(hash_data) {
+                    cached_hashes.push(hash_str.trim().to_string());
+                }
+            }
+            "cached_filename" => {
+                let mut filename_data = Vec::new();
+                while let Some(chunk) = field.next().await {
+                    filename_data.write_all(&chunk?)?;
+                }
+                if let Ok(filename_str) = String::from_utf8(filename_data) {
+                    cached_filenames.push(filename_str.trim().to_string());
                 }
             }
             _ => {
                 info!("Ignoring unknown multipart field: {}", field_name);
             }
         }
+    }
+
+    // Process cached images
+    for (hash, filename) in cached_hashes.into_iter().zip(cached_filenames.into_iter()) {
+        let image_source = ImageSource::Cached { hash, filename };
+        images_with_metadata.push((image_source, file_counter));
+        file_counter += 1;
     }
 
     Ok((images_with_metadata, processing_mode))
@@ -252,39 +297,39 @@ async fn handle_inference_streaming(
 
         let mut task_handles = Vec::new();
 
-        for (image_data, filename, mime_type, file_id) in images_with_metadata {
-            let filename_clone = filename.clone();
-
+        for (image_source, file_id) in images_with_metadata {
             let model_clone = model.clone();
             let cache_service_clone = cache_service.clone();
             let context_clone = context.clone();
             let processing_mode_clone = processing_mode.clone();
             let tx_clone = tx.clone();
             let spawn_start_clone = spawn_start;
+            let image_source_clone = image_source.clone();
+
+            // Get filename for logging before moving into async block
+            let filename = match &image_source {
+                ImageSource::Upload { filename, .. } => filename.clone(),
+                ImageSource::Cached { filename, .. } => filename.clone(),
+            };
 
             // Spawn each task as a separate tokio task for concurrency
             let handle = tokio::spawn(async move {
                 let task_id = Uuid::new_v4();
-                let image_hash = S3Service::calculate_image_hash(&image_data);
 
-                let result_json = if context_clone.use_cache && cache_service_clone.is_some() {
-                    let cache_service = cache_service_clone.as_ref().unwrap();
-                    let user_id = context_clone.user_id.unwrap();
+                let result_json = match image_source_clone {
+                    ImageSource::Upload {
+                        data: image_data,
+                        filename,
+                        mime_type,
+                    } => {
+                        let image_hash = S3Service::calculate_image_hash(&image_data);
 
-                    match cache_service
-                        .get_cached_inference(user_id, &image_hash, &processing_mode_clone)
-                        .await
-                    {
-                        Ok(cached_response) => {
-                            info!("Cache hit for file_id: {}", file_id);
-                            json!({
-                                "file_id": file_id,
-                                "task": { "id": task_id.to_string(), "status": "completed" },
-                                "inference": cached_response,
-                                "cached": true
-                            })
-                        }
-                        Err(_) => {
+                        // For newly uploaded images, always perform fresh inference
+                        // Cache the image for future reference if caching is enabled
+                        if context_clone.use_cache && cache_service_clone.is_some() {
+                            let cache_service = cache_service_clone.as_ref().unwrap();
+                            let user_id = context_clone.user_id.unwrap();
+
                             if let Err(e) = cache_service
                                 .cache_image(
                                     user_id,
@@ -296,6 +341,7 @@ async fn handle_inference_streaming(
                             {
                                 warn!("Failed to cache image '{}': {:?}", filename, e);
                             }
+
                             let params = ProcessImageParams::new(
                                 &model_clone,
                                 &image_data,
@@ -308,21 +354,107 @@ async fn handle_inference_streaming(
                                 cache_service_clone.as_ref(),
                             );
                             process_image_inference(params).await
+                        } else {
+                            let params = ProcessImageParams::new(
+                                &model_clone,
+                                &image_data,
+                                &filename,
+                                &image_hash,
+                                &processing_mode_clone,
+                                file_id,
+                                task_id,
+                                &context_clone,
+                                None,
+                            );
+                            process_image_inference(params).await
                         }
                     }
-                } else {
-                    let params = ProcessImageParams::new(
-                        &model_clone,
-                        &image_data,
-                        &filename,
-                        &image_hash,
-                        &processing_mode_clone,
-                        file_id,
-                        task_id,
-                        &context_clone,
-                        None,
-                    );
-                    process_image_inference(params).await
+
+                    ImageSource::Cached {
+                        hash: image_hash,
+                        filename,
+                    } => {
+                        if context_clone.use_cache && cache_service_clone.is_some() {
+                            let cache_service = cache_service_clone.as_ref().unwrap();
+                            let user_id = context_clone.user_id.unwrap();
+
+                            info!(
+                                "Processing cached image reanalysis for hash: {}",
+                                image_hash
+                            );
+
+                            // First check if we have a cached result for this processing mode
+                            match cache_service
+                                .get_cached_inference(user_id, &image_hash, &processing_mode_clone)
+                                .await
+                            {
+                                Ok(cached_response) => {
+                                    info!("Cache hit for cached image file_id: {}", file_id);
+                                    json!({
+                                        "file_id": file_id,
+                                        "task": { "id": task_id.to_string(), "status": "completed" },
+                                        "inference": cached_response,
+                                        "cached": true
+                                    })
+                                }
+                                Err(_) => {
+                                    // Fetch image data from S3 and process it
+                                    match cache_service
+                                        .get_cached_image_metadata(user_id, &image_hash)
+                                        .await
+                                    {
+                                        Ok(image_entry) => {
+                                            match cache_service
+                                                .get_cached_image_data(&image_entry.s3_key)
+                                                .await
+                                            {
+                                                Ok(image_data) => {
+                                                    let params = ProcessImageParams::new(
+                                                        &model_clone,
+                                                        &image_data,
+                                                        &filename,
+                                                        &image_hash,
+                                                        &processing_mode_clone,
+                                                        file_id,
+                                                        task_id,
+                                                        &context_clone,
+                                                        cache_service_clone.as_ref(),
+                                                    );
+                                                    process_image_inference(params).await
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to retrieve cached image data for {}: {:?}", image_hash, e);
+                                                    json!({
+                                                        "file_id": file_id,
+                                                        "task": { "id": task_id.to_string(), "status": "error" },
+                                                        "error": format!("Failed to retrieve cached image data: {:?}", e)
+                                                    })
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                "Failed to get cached image metadata for {}: {:?}",
+                                                image_hash, e
+                                            );
+                                            json!({
+                                                "file_id": file_id,
+                                                "task": { "id": task_id.to_string(), "status": "error" },
+                                                "error": format!("Failed to get cached image metadata: {:?}", e)
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            error!("Cached image reanalysis requested but caching not available");
+                            json!({
+                                "file_id": file_id,
+                                "task": { "id": task_id.to_string(), "status": "error" },
+                                "error": "Cached image reanalysis not available for unauthenticated users"
+                            })
+                        }
+                    }
                 };
 
                 // Send result immediately when this task completes
@@ -342,7 +474,7 @@ async fn handle_inference_streaming(
 
             info!(
                 "Spawned task for image '{}' (file_id: {}) at {:?}ms from spawn",
-                filename_clone,
+                filename,
                 file_id,
                 spawn_start.elapsed().as_millis()
             );
@@ -589,24 +721,27 @@ async fn handle_cache_history(
 
                 session_data["images"][file_id_counter.to_string()] = file_entry;
 
-                // Add inference results if available
                 if !entry.inference_results.is_empty() {
-                    // Use the most recent inference result (they're sorted by created_at)
-                    if let Some(latest_result) = entry.inference_results.first() {
+                    let mut results_by_mode = json!({});
+
+                    for result in &entry.inference_results {
                         let predictions: Vec<f32> =
-                            serde_json::from_value(latest_result.predictions.clone())
-                                .unwrap_or_default();
+                            serde_json::from_value(result.predictions.clone()).unwrap_or_default();
 
                         let inference_response = json!({
                             "predictions": predictions,
                             "class_labels": ["AI Generated", "Human Created"],
-                            "is_ai": latest_result.is_ai,
-                            "confidence": latest_result.confidence,
-                            "image_hash": entry.image_hash
+                            "is_ai": result.is_ai,
+                            "confidence": result.confidence,
+                            "image_hash": entry.image_hash,
+                            "processing_mode": result.processing_mode,
+                            "created_at": result.created_at
                         });
 
-                        session_data["results"][file_id_counter.to_string()] = inference_response;
+                        results_by_mode[&result.processing_mode] = inference_response;
                     }
+
+                    session_data["results"][file_id_counter.to_string()] = results_by_mode;
                 }
 
                 file_id_counter += 1;

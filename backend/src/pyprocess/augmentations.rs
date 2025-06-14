@@ -53,7 +53,6 @@ impl ChannelAugmentation {
         let (width, height) = img.dimensions();
 
         let rgb_data: Vec<f32> = img.as_raw().iter().map(|v| (*v as f32) / 255.0).collect();
-        println!("Creating RGB tensor");
         let rgb_tensor = Tensor::f_from_slice(&rgb_data)
             .map_err(|e| {
                 InferenceError::PreprocessingError(format!("Failed to create RGB tensor: {:?}", e))
@@ -554,7 +553,22 @@ fn ltp_pattern(gray: &Array2<f32>, threshold: f32) -> Array2<f32> {
     ltp
 }
 
+pub fn validate_image_format(image_bytes: &[u8]) -> Result<(), InferenceError> {
+    if image_bytes.is_empty() {
+        return Err(InferenceError::PreprocessingError(
+            "Image data is empty".to_string(),
+        ));
+    }
+
+    image::load_from_memory(image_bytes)
+        .map_err(|e| InferenceError::PreprocessingError(format!("Invalid image format: {}", e)))?;
+
+    Ok(())
+}
+
 pub fn preprocess(image_bytes: &[u8]) -> Result<Tensor, InferenceError> {
+    validate_image_format(image_bytes)?;
+
     let config = AugmentationConfig::load()
         .map_err(|e| InferenceError::PreprocessingError(format!("Failed to load config: {}", e)))?;
 

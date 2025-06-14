@@ -41,7 +41,10 @@ async fn main() -> std::io::Result<()> {
     let mut model = Model::new();
     if let Err(e) = model.persistent_load(&shared::ProcessingMode::IntermediateFusionEnsemble) {
         log::error!("Failed to preload model at startup: {:?}", e);
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Model loading failed: {:?}", e)));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Model loading failed: {:?}", e),
+        ));
     }
 
     let model = Arc::new(Mutex::new(model));
@@ -96,7 +99,6 @@ async fn main() -> std::io::Result<()> {
     let auth_middleware = AuthMiddleware::new(jwt_service.clone());
 
     // Log authentication configuration status
-    log::info!("Authentication Configuration");
     if cognito_configured {
         log::info!("Cognito configuration detected");
     } else {
@@ -105,7 +107,6 @@ async fn main() -> std::io::Result<()> {
         );
     }
 
-    log::info!("Authentication endpoint:");
     let base_url = env::var("BASE_URL").unwrap().to_string();
     if cognito_configured {
         log::info!("Login: {}/auth/login", base_url);
